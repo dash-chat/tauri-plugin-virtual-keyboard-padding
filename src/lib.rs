@@ -34,8 +34,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .setup(|app, api| {
             #[cfg(mobile)]
             let virtual_keyboard_padding = mobile::init(app, api)?;
-            // #[cfg(desktop)]
-            // let virtual_keyboard_padding = desktop::init(app, api)?;
+            #[cfg(desktop)]
+            let virtual_keyboard_padding = desktop::init(app, api)?;
             app.manage(virtual_keyboard_padding);
             Ok(())
         })
