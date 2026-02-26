@@ -5,7 +5,7 @@ use tauri::{
 
 #[cfg(desktop)]
 mod desktop;
-#[cfg(mobile)]
+#[cfg(target_os = "android")]
 mod mobile;
 
 mod error;
@@ -14,7 +14,7 @@ pub use error::{Error, Result};
 
 #[cfg(desktop)]
 use desktop::VirtualKeyboardPadding;
-#[cfg(mobile)]
+#[cfg(target_os = "android")]
 use mobile::VirtualKeyboardPadding;
 
 // /// Extensions to [`tauri::App`], [`tauri::AppHandle`] and [`tauri::Window`] to access the virtual-keyboard-padding APIs.
@@ -32,11 +32,16 @@ use mobile::VirtualKeyboardPadding;
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("virtual-keyboard-padding")
         .setup(|app, api| {
-            #[cfg(mobile)]
-            let virtual_keyboard_padding = mobile::init(app, api)?;
+            #[cfg(target_os = "android")]
+            {
+                let virtual_keyboard_padding = mobile::init(app, api)?;
+                app.manage(virtual_keyboard_padding);
+            }
             #[cfg(desktop)]
-            let virtual_keyboard_padding = desktop::init(app, api)?;
-            app.manage(virtual_keyboard_padding);
+            {
+                let virtual_keyboard_padding = desktop::init(app, api)?;
+                app.manage(virtual_keyboard_padding);
+            }
             Ok(())
         })
         .build()
