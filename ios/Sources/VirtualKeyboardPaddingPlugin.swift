@@ -98,6 +98,36 @@ class VirtualKeyboardPaddingPlugin: Plugin, UIScrollViewDelegate {
         animate(notification) { [weak self] in
             self?.shrinkWebView(byKeyboardHeight: endFrame.height)
         }
+        // The contentOffset clamp on the outer scrollView (above) blocks
+        // WebKit's auto-scroll-to-focused-input. Konsta-style apps put the
+        // scrollable surface in an inner `overflow: auto` element which the
+        // clamp doesn't touch, but WebKit doesn't reliably auto-scroll those
+        // either — so an input near the bottom of a long page stays under the
+        // keyboard. Trigger a manual `scrollIntoView` on the focused element;
+        // `block: 'nearest'` is a no-op when it's already in view (e.g. a
+        // chat compose textarea anchored at the bottom).
+        scrollFocusedElementIntoView()
+    }
+
+    private func scrollFocusedElementIntoView() {
+        guard let webView = webView else { return }
+        // `behavior: 'instant'` rather than smooth: the WebView frame change
+        // animates over the keyboard's ~250ms duration, so we want the page
+        // already scrolled to its target position by the time the frame
+        // starts visibly transitioning. A smooth scroll runs on its own
+        // curve and lags behind the keyboard, leaving the input under the
+        // keyboard for the duration of the animation.
+        let js = """
+            (function() {
+                var el = document.activeElement;
+                if (!el) return;
+                var tag = el.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable) {
+                    el.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+                }
+            })();
+        """
+        webView.evaluateJavaScript(js)
     }
 
     private func shrinkWebView(byKeyboardHeight keyboardHeight: CGFloat) {
