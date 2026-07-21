@@ -19,7 +19,7 @@ Default permissions for the plugin
 <tr>
 <td>
 
-`virtual-keyboard-padding:allow-hide`
+`virtual-keyboard:allow-hide`
 
 </td>
 <td>
@@ -32,7 +32,7 @@ Enables the hide command without any pre-configured scope.
 <tr>
 <td>
 
-`virtual-keyboard-padding:deny-hide`
+`virtual-keyboard:deny-hide`
 
 </td>
 <td>
@@ -45,7 +45,7 @@ Denies the hide command without any pre-configured scope.
 <tr>
 <td>
 
-`virtual-keyboard-padding:allow-ping`
+`virtual-keyboard:allow-ping`
 
 </td>
 <td>
@@ -58,7 +58,7 @@ Enables the ping command without any pre-configured scope.
 <tr>
 <td>
 
-`virtual-keyboard-padding:deny-ping`
+`virtual-keyboard:deny-ping`
 
 </td>
 <td>
@@ -71,7 +71,7 @@ Denies the ping command without any pre-configured scope.
 <tr>
 <td>
 
-`virtual-keyboard-padding:allow-show`
+`virtual-keyboard:allow-show`
 
 </td>
 <td>
@@ -84,7 +84,7 @@ Enables the show command without any pre-configured scope.
 <tr>
 <td>
 
-`virtual-keyboard-padding:deny-show`
+`virtual-keyboard:deny-show`
 
 </td>
 <td>

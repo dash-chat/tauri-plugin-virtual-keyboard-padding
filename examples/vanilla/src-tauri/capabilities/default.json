@@ -7,6 +7,6 @@
   ],
   "permissions": [
     "core:default",
-    "virtual-keyboard-padding:default"
+    "virtual-keyboard:default"
   ]
 }

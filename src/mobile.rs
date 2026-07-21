@@ -8,24 +8,24 @@ use tauri::{
 pub fn init<R: Runtime, C: DeserializeOwned>(
   _app: &AppHandle<R>,
   api: PluginApi<R, C>,
-) -> crate::Result<VirtualKeyboardPadding<R>> {
-  let handle = api.register_android_plugin("org.dashchat.virtualkeyboardpadding", "VirtualKeyboardPaddingPlugin")?;
-  Ok(VirtualKeyboardPadding(handle))
+) -> crate::Result<VirtualKeyboard<R>> {
+  let handle = api.register_android_plugin("org.dashchat.virtualkeyboard", "VirtualKeyboardPlugin")?;
+  Ok(VirtualKeyboard(handle))
 }
 
 #[cfg(target_os = "ios")]
 pub fn init<R: Runtime, C: DeserializeOwned>(
   _app: &AppHandle<R>,
   api: PluginApi<R, C>,
-) -> crate::Result<VirtualKeyboardPadding<R>> {
-  let handle = api.register_ios_plugin(super::init_plugin_virtual_keyboard_padding)?;
-  Ok(VirtualKeyboardPadding(handle))
+) -> crate::Result<VirtualKeyboard<R>> {
+  let handle = api.register_ios_plugin(super::init_plugin_virtual_keyboard)?;
+  Ok(VirtualKeyboard(handle))
 }
 
-/// Access to the virtual-keyboard-padding APIs.
-pub struct VirtualKeyboardPadding<R: Runtime>(PluginHandle<R>);
+/// Access to the virtual-keyboard APIs.
+pub struct VirtualKeyboard<R: Runtime>(PluginHandle<R>);
 
-impl<R: Runtime> VirtualKeyboardPadding<R> {
+impl<R: Runtime> VirtualKeyboard<R> {
   pub fn hide(&self) -> crate::Result<()> {
     self.0.run_mobile_plugin("hide", ()).map_err(Into::into)
   }

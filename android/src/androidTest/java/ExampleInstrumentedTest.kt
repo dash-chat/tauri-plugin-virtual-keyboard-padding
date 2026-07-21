@@ -1,4 +1,4 @@
-package org.dashchat.virtual-keyboard-padding
+package org.dashchat.virtual-keyboard
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -19,6 +19,6 @@ class ExampleInstrumentedTest {
     fun useAppContext() {
         // Context of the app under test.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("org.dashchat.virtual-keyboard-padding", appContext.packageName)
+        assertEquals("org.dashchat.virtual-keyboard", appContext.packageName)
     }
 }

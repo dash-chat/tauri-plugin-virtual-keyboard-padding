@@ -1,4 +1,4 @@
-# Tauri Plugin: Virtual Keyboard Padding
+# Tauri Plugin: Virtual Keyboard
 
 A Tauri plugin that automatically adjusts the WebView padding when the virtual keyboard appears on Android, preventing input fields from being obscured.
 
@@ -18,7 +18,7 @@ Add the plugin to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-tauri-plugin-virtual-keyboard-padding = { git = "https://github.com/dash-chat/tauri-plugin-virtual-keyboard-padding" }
+tauri-plugin-virtual-keyboard = { git = "https://github.com/dash-chat/tauri-plugin-virtual-keyboard" }
 ```
 
 ## Usage
@@ -28,7 +28,7 @@ Register the plugin in your Tauri application:
 ```rust
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_virtual_keyboard_padding::init())
+        .plugin(tauri_plugin_virtual_keyboard::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

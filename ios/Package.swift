@@ -2,15 +2,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "tauri-plugin-virtual-keyboard-padding",
+    name: "tauri-plugin-virtual-keyboard",
     platforms: [
         .iOS(.v13),
     ],
     products: [
         .library(
-            name: "tauri-plugin-virtual-keyboard-padding",
+            name: "tauri-plugin-virtual-keyboard",
             type: .static,
-            targets: ["tauri-plugin-virtual-keyboard-padding"]
+            targets: ["tauri-plugin-virtual-keyboard"]
         ),
     ],
     dependencies: [
@@ -18,7 +18,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "tauri-plugin-virtual-keyboard-padding",
+            name: "tauri-plugin-virtual-keyboard",
             dependencies: [
                 .byName(name: "Tauri"),
             ],

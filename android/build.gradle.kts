@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "org.dashchat.virtualkeyboardpadding"
+    namespace = "org.dashchat.virtualkeyboard"
     compileSdk = 36
 
     defaultConfig {

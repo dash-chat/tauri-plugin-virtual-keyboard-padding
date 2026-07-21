@@ -1,13 +1,13 @@
 use tauri::{command, AppHandle, Runtime};
 
-use crate::VirtualKeyboardPaddingExt;
+use crate::VirtualKeyboardExt;
 
 #[command]
 pub(crate) async fn hide<R: Runtime>(app: AppHandle<R>) -> crate::Result<()> {
-  app.virtual_keyboard_padding().hide()
+  app.virtual_keyboard().hide()
 }
 
 #[command]
 pub(crate) async fn show<R: Runtime>(app: AppHandle<R>) -> crate::Result<()> {
-  app.virtual_keyboard_padding().show()
+  app.virtual_keyboard().show()
 }

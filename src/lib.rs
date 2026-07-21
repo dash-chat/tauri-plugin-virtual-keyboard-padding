@@ -14,36 +14,36 @@ mod error;
 pub use error::{Error, Result};
 
 #[cfg(desktop)]
-use desktop::VirtualKeyboardPadding;
+use desktop::VirtualKeyboard;
 #[cfg(mobile)]
-use mobile::VirtualKeyboardPadding;
+use mobile::VirtualKeyboard;
 
 #[cfg(target_os = "ios")]
-tauri::ios_plugin_binding!(init_plugin_virtual_keyboard_padding);
+tauri::ios_plugin_binding!(init_plugin_virtual_keyboard);
 
-pub trait VirtualKeyboardPaddingExt<R: Runtime> {
-    fn virtual_keyboard_padding(&self) -> &VirtualKeyboardPadding<R>;
+pub trait VirtualKeyboardExt<R: Runtime> {
+    fn virtual_keyboard(&self) -> &VirtualKeyboard<R>;
 }
 
-impl<R: Runtime, T: Manager<R>> VirtualKeyboardPaddingExt<R> for T {
-    fn virtual_keyboard_padding(&self) -> &VirtualKeyboardPadding<R> {
-        self.state::<VirtualKeyboardPadding<R>>().inner()
+impl<R: Runtime, T: Manager<R>> VirtualKeyboardExt<R> for T {
+    fn virtual_keyboard(&self) -> &VirtualKeyboard<R> {
+        self.state::<VirtualKeyboard<R>>().inner()
     }
 }
 
 /// Initializes the plugin.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    Builder::new("virtual-keyboard-padding")
+    Builder::new("virtual-keyboard")
         .invoke_handler(tauri::generate_handler![commands::hide, commands::show])
         .setup(|app, api| {
             #[cfg(target_os = "android")]
-            let virtual_keyboard_padding = mobile::init(app, api)?;
+            let virtual_keyboard = mobile::init(app, api)?;
             #[cfg(target_os = "ios")]
-            let virtual_keyboard_padding = mobile::init(app, api)?;
+            let virtual_keyboard = mobile::init(app, api)?;
             #[cfg(desktop)]
-            let virtual_keyboard_padding = desktop::init(app, api)?;
+            let virtual_keyboard = desktop::init(app, api)?;
 
-            app.manage(virtual_keyboard_padding);
+            app.manage(virtual_keyboard);
             Ok(())
         })
         .build()
