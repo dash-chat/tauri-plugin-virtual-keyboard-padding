@@ -1,5 +1,5 @@
 {
-  "name": "tauri-plugin-virtual-keyboard-api",
+  "name": "tauri-plugin-virtual-keyboard",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",

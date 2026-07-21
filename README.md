@@ -41,7 +41,7 @@ Grant the commands in a capability file:
 Add the JS API to your frontend:
 
 ```json
-"tauri-plugin-virtual-keyboard-api": "github:dash-chat/tauri-plugin-virtual-keyboard#<commit>"
+"tauri-plugin-virtual-keyboard": "github:dash-chat/tauri-plugin-virtual-keyboard#<commit>"
 ```
 
 ## How It Works
@@ -66,7 +66,7 @@ import {
   keyboard,
   onKeyboardWillShow,
   onKeyboardWillHide,
-} from 'tauri-plugin-virtual-keyboard-api';
+} from 'tauri-plugin-virtual-keyboard';
 
 trackKeyboardHeight(); // once at startup
 
