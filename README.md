@@ -56,25 +56,26 @@ On iOS it additionally disables WKWebView's own keyboard scroll handling, locks 
 
 ## JS API
 
+The keyboard state is exposed as [signalium](https://github.com/pzuraq/signalium) signals (`signalium` is a peer dependency), so reads are reactive inside `reactive()`/`watcher()` contexts:
+
 ```ts
 import {
   hideKeyboard,
   showKeyboard,
   trackKeyboardHeight,
   keyboard,
-  onKeyboardChange,
   onKeyboardWillShow,
   onKeyboardWillHide,
 } from 'tauri-plugin-virtual-keyboard-api';
 
 trackKeyboardHeight(); // once at startup
 
-keyboard.height;         // CSS px, settles at animation endpoints
-keyboard.isOpen;
-keyboard.reservedHeight; // largest height seen, persisted; fallback before first open
+keyboard.height.value;         // CSS px, settles at animation endpoints
+keyboard.isOpen.value;
+keyboard.reservedHeight.value; // largest height seen, persisted; fallback before first open
 
-await hideKeyboard();    // retract via the OS
-await showKeyboard();    // summon for the currently focused input (Android)
+await hideKeyboard();          // retract via the OS
+await showKeyboard();          // summon for the currently focused input (Android)
 ```
 
 ## License

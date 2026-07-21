@@ -2,7 +2,6 @@ import { invoke } from '@tauri-apps/api/core';
 
 export {
   keyboard,
-  onKeyboardChange,
   onKeyboardWillShow,
   onKeyboardWillHide,
   trackKeyboardHeight,

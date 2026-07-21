@@ -12,6 +12,9 @@ importers:
         specifier: ^2
         version: 2.11.1
     devDependencies:
+      signalium:
+        specifier: ^3.0.1
+        version: 3.0.3
       typescript:
         specifier: ^5.6.0
         version: 5.9.3
@@ -21,6 +24,14 @@ packages:
   '@tauri-apps/api@2.11.1':
     resolution: {integrity: sha512-M2FPuYND2m+wh5hfW9ZpSdxMPdEJovPBWwoHJmwUpysTYNHaOkVFN419m/K0LIgjb/7KU2vBgsUepJWugQCvAA==}
 
+  signalium@3.0.3:
+    resolution: {integrity: sha512-hmseMzywyYnJaPX3Q3mtsvzLGRLrhgSZZmsgMkLrlkTmruVNHSiaQpuSWWGMUltKNwNjHLWhKkB4VieeZ/lwmQ==}
+    peerDependencies:
+      react: '>=19.0.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
+
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -29,5 +40,7 @@ packages:
 snapshots:
 
   '@tauri-apps/api@2.11.1': {}
+
+  signalium@3.0.3: {}
 
   typescript@5.9.3: {}

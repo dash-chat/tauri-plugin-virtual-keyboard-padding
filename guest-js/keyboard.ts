@@ -1,4 +1,5 @@
 import { addPluginListener } from '@tauri-apps/api/core';
+import { signal, reactiveSignal, type ReadonlySignal } from 'signalium';
 
 const FALLBACK_HEIGHT = 270;
 const STORAGE_KEY = 'virtual-keyboard:keyboard-height';
@@ -13,27 +14,23 @@ export interface KeyboardWillHideEvent {
   durationMs: number;
 }
 
-let height = 0;
-let open = false;
-let maxHeight = 0;
+const height = signal(0);
+const open = signal(false);
+const maxHeight = signal(0);
 let tracking = false;
 
-const changeListeners = new Set<() => void>();
 const willShowListeners = new Set<(event: KeyboardWillShowEvent) => void>();
 const willHideListeners = new Set<(event: KeyboardWillHideEvent) => void>();
 
 function setState(nextHeight: number, nextOpen: boolean) {
-  if (nextHeight === height && nextOpen === open) return;
-  height = nextHeight;
-  open = nextOpen;
-  for (const listener of changeListeners) listener();
+  height.value = nextHeight;
+  open.value = nextOpen;
 }
 
 function adoptHeight(candidate: number) {
-  if (candidate <= maxHeight) return;
-  maxHeight = candidate;
+  if (candidate <= maxHeight.value) return;
+  maxHeight.value = candidate;
   localStorage.setItem(STORAGE_KEY, String(candidate));
-  for (const listener of changeListeners) listener();
 }
 
 function listen<T>(event: string, handler: (payload: T) => void) {
@@ -48,7 +45,7 @@ export function trackKeyboardHeight() {
   if (tracking || typeof window === 'undefined') return;
   tracking = true;
   const stored = Number(localStorage.getItem(STORAGE_KEY));
-  if (stored > 0) maxHeight = stored;
+  if (stored > 0) maxHeight.value = stored;
   listen<KeyboardWillShowEvent>('willShow', event => {
     adoptHeight(event.height);
     setState(event.height, true);
@@ -69,13 +66,6 @@ export function trackKeyboardHeight() {
   });
 }
 
-/** Subscribe to state changes (height, isOpen or reservedHeight). Returns an
- * unsubscribe function. */
-export function onKeyboardChange(listener: () => void): () => void {
-  changeListeners.add(listener);
-  return () => changeListeners.delete(listener);
-}
-
 /** Subscribe to the native will-show notification, which arrives with the
  * target height and duration before the open animation starts. */
 export function onKeyboardWillShow(
@@ -94,19 +84,17 @@ export function onKeyboardWillHide(
   return () => willHideListeners.delete(listener);
 }
 
-/** Current keyboard state, fed by the native events. Heights are in CSS px
- * and settle at the animation endpoints; per-frame layout should consume the
- * --keyboard-height CSS variable the plugin maintains instead. */
-export const keyboard = {
-  get height() {
-    return height;
-  },
-  get isOpen() {
-    return open;
-  },
+/** Keyboard state as signalium signals, fed by the native events. Heights are
+ * in CSS px and settle at the animation endpoints; per-frame layout should
+ * consume the --keyboard-height CSS variable the plugin maintains instead. */
+export const keyboard: {
+  height: ReadonlySignal<number>;
+  isOpen: ReadonlySignal<boolean>;
   /** The full keyboard height (largest seen, persisted), or a fallback before
    * any keyboard has been shown. */
-  get reservedHeight() {
-    return maxHeight || FALLBACK_HEIGHT;
-  },
+  reservedHeight: ReadonlySignal<number>;
+} = {
+  height,
+  isOpen: open,
+  reservedHeight: reactiveSignal(() => maxHeight.value || FALLBACK_HEIGHT),
 };
