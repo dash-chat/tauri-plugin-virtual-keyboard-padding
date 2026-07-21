@@ -1,16 +1,16 @@
 # Tauri Plugin: Virtual Keyboard
 
-A Tauri plugin that automatically adjusts the WebView padding when the virtual keyboard appears on Android, preventing input fields from being obscured.
+A Tauri plugin that integrates the mobile soft keyboard with the webview: the webview keeps its full size (the keyboard overlays it), and the plugin reports the keyboard to the page and lets it control the keyboard natively.
 
 This plugin addresses [tauri-apps/tauri#10631](https://github.com/tauri-apps/tauri/issues/10631).
 
 ## Platform Support
 
-| Platform | Supported |
-|----------|-----------|
-| Android  | Yes       |
-| iOS      | No        |
-| Desktop  | No        |
+| Platform | Supported                       |
+|----------|---------------------------------|
+| Android  | Yes                             |
+| iOS      | Yes (`show` command is a no-op) |
+| Desktop  | Commands/events are no-ops      |
 
 ## Installation
 
@@ -21,9 +21,7 @@ Add the plugin to your `Cargo.toml`:
 tauri-plugin-virtual-keyboard = { git = "https://github.com/dash-chat/tauri-plugin-virtual-keyboard" }
 ```
 
-## Usage
-
-Register the plugin in your Tauri application:
+Register it in your Tauri application:
 
 ```rust
 fn main() {
@@ -34,16 +32,50 @@ fn main() {
 }
 ```
 
-That's it! The plugin automatically handles keyboard insets - no additional API calls required.
+Grant the commands in a capability file:
+
+```json
+"permissions": ["virtual-keyboard:default"]
+```
+
+Add the JS API to your frontend:
+
+```json
+"tauri-plugin-virtual-keyboard-api": "github:dash-chat/tauri-plugin-virtual-keyboard#<commit>"
+```
 
 ## How It Works
 
-The plugin uses Android's `WindowInsetsCompat` API to detect when the IME (Input Method Editor / virtual keyboard) appears. When the keyboard is shown, it:
+The plugin never resizes the webview; the keyboard overlays it. Instead it:
 
-1. Applies bottom padding to the root view equal to the keyboard height
-2. Scrolls the WebView to the top to ensure proper layout
+1. Maintains a `--keyboard-height` CSS variable on `document.documentElement`, updated **per frame** during keyboard animations (Android: `WindowInsetsAnimationCompat` progress; iOS: display-link interpolation over the keyboard notification's duration). Lay your app out against it, e.g. `padding-bottom: var(--keyboard-height, 0px)` on the app shell.
+2. Emits keyboard events consumed by the JS API: `willShow { height, durationMs }` (before the open animation, with the target height in CSS px), `willHide { durationMs }`, `didShow { height }`, `didHide`, and `change { height }` for non-animated changes.
+3. Exposes native `hide`/`show` commands (`WindowInsetsControllerCompat.hide/show(ime())` on Android, `endEditing` on iOS) so the app never has to manipulate the keyboard through DOM focus tricks.
 
-This ensures that input fields remain visible and accessible when the virtual keyboard is displayed.
+On iOS it additionally disables WKWebView's own keyboard scroll handling, locks the scroll view, and removes the "Done" input-accessory toolbar.
+
+## JS API
+
+```ts
+import {
+  hideKeyboard,
+  showKeyboard,
+  trackKeyboardHeight,
+  keyboard,
+  onKeyboardChange,
+  onKeyboardWillShow,
+  onKeyboardWillHide,
+} from 'tauri-plugin-virtual-keyboard-api';
+
+trackKeyboardHeight(); // once at startup
+
+keyboard.height;         // CSS px, settles at animation endpoints
+keyboard.isOpen;
+keyboard.reservedHeight; // largest height seen, persisted; fallback before first open
+
+await hideKeyboard();    // retract via the OS
+await showKeyboard();    // summon for the currently focused input (Android)
+```
 
 ## License
 
