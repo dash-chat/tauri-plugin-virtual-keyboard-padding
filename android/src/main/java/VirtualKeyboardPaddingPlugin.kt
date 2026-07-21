@@ -12,13 +12,17 @@ import androidx.core.view.OnApplyWindowInsetsListener
 import android.webkit.WebView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 // From https://github.com/tauri-apps/tauri/issues/10631
 
 @TauriPlugin
 class VirtualKeyboardPaddingPlugin(private val activity: Activity): Plugin(activity) {
+    private var webView: WebView? = null
+
     override fun load(webView: WebView) {
         super.load(webView)
+        this.webView = webView
         val rootView = activity.window.decorView
 
         ViewCompat.setOnApplyWindowInsetsListener(rootView,
@@ -34,5 +38,27 @@ class VirtualKeyboardPaddingPlugin(private val activity: Activity): Plugin(activ
 
                 windowInsets
             })
+    }
+
+    @Command
+    fun hide(invoke: Invoke) {
+        activity.runOnUiThread {
+            webView?.let {
+                WindowInsetsControllerCompat(activity.window, it)
+                    .hide(WindowInsetsCompat.Type.ime())
+            }
+            invoke.resolve()
+        }
+    }
+
+    @Command
+    fun show(invoke: Invoke) {
+        activity.runOnUiThread {
+            webView?.let {
+                WindowInsetsControllerCompat(activity.window, it)
+                    .show(WindowInsetsCompat.Type.ime())
+            }
+            invoke.resolve()
+        }
     }
 }

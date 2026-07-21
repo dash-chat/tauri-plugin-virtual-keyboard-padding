@@ -12,9 +12,11 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 pub struct VirtualKeyboardPadding<R: Runtime>(AppHandle<R>);
 
 impl<R: Runtime> VirtualKeyboardPadding<R> {
-  // pub fn ping(&self, payload: PingRequest) -> crate::Result<PingResponse> {
-  //   Ok(PingResponse {
-  //     value: payload.value,
-  //   })
-  // }
+  pub fn hide(&self) -> crate::Result<()> {
+    Ok(())
+  }
+
+  pub fn show(&self) -> crate::Result<()> {
+    Ok(())
+  }
 }

@@ -48,6 +48,21 @@ class VirtualKeyboardPaddingPlugin: Plugin, UIScrollViewDelegate {
         )
     }
 
+    // MARK: - Commands
+
+    @objc public func hide(_ invoke: Invoke) throws {
+        DispatchQueue.main.async { [weak self] in
+            self?.webView?.endEditing(true)
+            invoke.resolve()
+        }
+    }
+
+    /// iOS cannot summon the keyboard programmatically for webview content;
+    /// it only appears when the user focuses an input. Resolves as a no-op.
+    @objc public func show(_ invoke: Invoke) throws {
+        invoke.resolve()
+    }
+
     // MARK: - Background color
 
     /// Auto-detect the page's rendered background color via JavaScript,

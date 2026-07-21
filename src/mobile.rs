@@ -25,4 +25,12 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 /// Access to the virtual-keyboard-padding APIs.
 pub struct VirtualKeyboardPadding<R: Runtime>(PluginHandle<R>);
 
-impl<R: Runtime> VirtualKeyboardPadding<R> {}
+impl<R: Runtime> VirtualKeyboardPadding<R> {
+  pub fn hide(&self) -> crate::Result<()> {
+    self.0.run_mobile_plugin("hide", ()).map_err(Into::into)
+  }
+
+  pub fn show(&self) -> crate::Result<()> {
+    self.0.run_mobile_plugin("show", ()).map_err(Into::into)
+  }
+}
