@@ -6,6 +6,8 @@ Default permissions for the plugin
 
 - `allow-hide`
 - `allow-show`
+- `allow-registerListener`
+- `allow-removeListener`
 
 ## Permission Table
 
@@ -64,6 +66,58 @@ Enables the ping command without any pre-configured scope.
 <td>
 
 Denies the ping command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`virtual-keyboard:allow-registerListener`
+
+</td>
+<td>
+
+Enables the registerListener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`virtual-keyboard:deny-registerListener`
+
+</td>
+<td>
+
+Denies the registerListener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`virtual-keyboard:allow-removeListener`
+
+</td>
+<td>
+
+Enables the removeListener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`virtual-keyboard:deny-removeListener`
+
+</td>
+<td>
+
+Denies the removeListener command without any pre-configured scope.
 
 </td>
 </tr>

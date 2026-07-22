@@ -4,11 +4,6 @@ import WebKit
 
 class VirtualKeyboardPlugin: Plugin, UIScrollViewDelegate {
     private weak var webView: WKWebView?
-    private var displayLink: CADisplayLink?
-    private var animStart: CFTimeInterval = 0
-    private var animDuration: Double = 0.25
-    private var animFrom: CGFloat = 0
-    private var animTo: CGFloat = 0
     private var currentHeight: CGFloat = 0
 
     public override func load(webview: WKWebView) {
@@ -95,10 +90,10 @@ class VirtualKeyboardPlugin: Plugin, UIScrollViewDelegate {
         else { return }
 
         let height = keyboardFrame.height
-        guard height > 0, height != animTo else { return }
+        guard height > 0, height != currentHeight else { return }
+        currentHeight = height
 
         let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
-        animateHeightVar(to: height, duration: duration)
 
         var data = JSObject()
         data["height"] = Double(height)
@@ -107,10 +102,10 @@ class VirtualKeyboardPlugin: Plugin, UIScrollViewDelegate {
     }
 
     @objc private func keyboardWillHide(_ notification: Notification) {
-        guard animTo > 0 || currentHeight > 0 else { return }
+        guard currentHeight > 0 else { return }
+        currentHeight = 0
 
         let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
-        animateHeightVar(to: 0, duration: duration)
 
         var data = JSObject()
         data["durationMs"] = duration * 1000
@@ -119,47 +114,12 @@ class VirtualKeyboardPlugin: Plugin, UIScrollViewDelegate {
 
     @objc private func keyboardDidShow(_ notification: Notification) {
         var data = JSObject()
-        data["height"] = Double(animTo)
+        data["height"] = Double(currentHeight)
         try? trigger("didShow", data: data)
     }
 
     @objc private func keyboardDidHide(_ notification: Notification) {
         try? trigger("didHide", data: JSObject())
-    }
-
-    // MARK: - --keyboard-height animation
-
-    /// iOS has no per-frame keyboard position callback, so the variable is
-    /// interpolated over the notification's duration with a display link.
-    private func animateHeightVar(to target: CGFloat, duration: Double) {
-        displayLink?.invalidate()
-        animFrom = currentHeight
-        animTo = target
-        animDuration = max(duration, 0.01)
-        animStart = CACurrentMediaTime()
-        let link = CADisplayLink(target: self, selector: #selector(stepHeightVar))
-        link.add(to: .main, forMode: .common)
-        displayLink = link
-    }
-
-    @objc private func stepHeightVar() {
-        let t = min(1, (CACurrentMediaTime() - animStart) / animDuration)
-        // Ease-out cubic: close enough to the (undocumented, spring-like)
-        // keyboard curve that the page tracks its edge without visible drift.
-        let eased = 1 - pow(1 - t, 3)
-        setHeightVar(animFrom + (animTo - animFrom) * CGFloat(eased))
-        if t >= 1 {
-            displayLink?.invalidate()
-            displayLink = nil
-        }
-    }
-
-    private func setHeightVar(_ height: CGFloat) {
-        currentHeight = height
-        webView?.evaluateJavaScript(
-            "document.documentElement.style.setProperty('--keyboard-height','\(height)px')",
-            completionHandler: nil
-        )
     }
 
     /// Swizzle the WKWebView content view's inputAccessoryView to remove the "Done" toolbar.
@@ -187,7 +147,6 @@ class VirtualKeyboardPlugin: Plugin, UIScrollViewDelegate {
     }
 
     deinit {
-        displayLink?.invalidate()
         webView?.scrollView.delegate = nil
         NotificationCenter.default.removeObserver(self)
     }
