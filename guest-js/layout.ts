@@ -4,8 +4,26 @@ import { hideCaret, restoreCaret } from './caret';
 import { hideKeyboard } from './commands';
 import { keyboard, onKeyboardWillHide, onKeyboardWillShow } from './keyboard';
 
-// Approximates iOS's keyboard animation curve so the content tracks its edge.
-const CURVE = 'cubic-bezier(0.38, 0.7, 0.125, 1)';
+const IS_ANDROID =
+  typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+
+// Matches each OS's IME animation so the content tracks the keyboard's edge.
+// On Android the reported durationMs can far exceed the IME's actual visual
+// animation (observed ~100ms on OEM keyboards reporting 285ms), and willShow
+// reaches JS a frame or two after the animation starts — so the glide is
+// clamped short and uses an emphasized-decelerate curve that front-loads
+// progress to make up the late start. Trailing the keyboard slightly is the
+// safe direction (it hides behind the keyboard); leading would paint a
+// background band, so the clamp is chosen to stay just behind. iOS keeps the
+// historical approximation of its keyboard curve and its reported duration.
+const CURVE = IS_ANDROID
+  ? 'cubic-bezier(0.05, 0.7, 0.1, 1)'
+  : 'cubic-bezier(0.38, 0.7, 0.125, 1)';
+const ANDROID_MAX_GLIDE_MS = 150;
+
+function glideDuration(durationMs: number): number {
+  return IS_ANDROID ? Math.min(durationMs, ANDROID_MAX_GLIDE_MS) : durationMs;
+}
 
 const nodes = new Set<HTMLElement>();
 
@@ -24,9 +42,10 @@ let flipGeneration = 0;
  * superseded before finishing).
  */
 function scheduleSettle(
-  layered: Iterable<HTMLElement>,
+  toClear: Iterable<HTMLElement>,
   durationMs: number,
   generation: number,
+  applyInsetOnSettle = false,
 ) {
   const removers: Array<() => void> = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -37,7 +56,11 @@ function scheduleSettle(
     removers.length = 0;
     // A newer glide owns the caret now, and will restore it from its own settle.
     if (generation !== flipGeneration) return;
-    for (const node of layered) {
+    // A layout-at-end glide swaps the glided transforms for the real layout
+    // here, in one paint: the reflow lands exactly where the transforms left
+    // off.
+    if (applyInsetOnSettle) applyInset();
+    for (const node of toClear) {
       // Clear the transition first so dropping the transform is instant — it's
       // the identity, so there is nothing to animate away.
       node.style.transition = '';
@@ -52,7 +75,7 @@ function scheduleSettle(
     if (event.propertyName === 'transform') run();
   };
 
-  for (const node of layered) {
+  for (const node of toClear) {
     node.addEventListener('transitionend', onTransitionEnd);
     removers.push(() =>
       node.removeEventListener('transitionend', onTransitionEnd),
@@ -70,8 +93,20 @@ function scheduleSettle(
  * each sat, apply the inverse `transform` so it looks unmoved, then transition
  * the transform away so it *glides* to its new spot on the compositor, in sync
  * with the native keyboard.
+ *
+ * The one-shot reflow happens at whichever endpoint of the transition the
+ * keyboard is up, so the layout only ever changes while the keyboard occludes
+ * the region the change affects. `layoutAtEnd` is the show path: reflowing at
+ * the start would snap unregistered bottom-anchored chrome to its final spot
+ * and clip content against the already-shrunk page while the keyboard is still
+ * rising. Instead the old layout persists through the glide — the final layout
+ * is measured invisibly (apply → read → revert), transforms carry the nodes to
+ * those targets, and the settle applies the reflow under the fully-risen
+ * keyboard. Hide keeps the reflow up front: the layout has to grow immediately
+ * so the region the keyboard vacates exists to glide down into.
  */
-function flip(durationMs: number) {
+function flip(durationMs: number, layoutAtEnd = false) {
+  durationMs = glideDuration(durationMs);
   const generation = ++flipGeneration;
   // WKWebView mis-renders a text caret whose ancestor is mid-transform. Keeping
   // the node that holds the focused caret on its own GPU layer — translate3d
@@ -95,6 +130,46 @@ function flip(durationMs: number) {
     n.style.transition = 'none';
     n.style.transform = '';
   });
+
+  if (layoutAtEnd) {
+    const doc = document.documentElement;
+    // Where the old layout puts each node untransformed (differs from `firsts`
+    // only when a glide was in flight).
+    const oldTops = new Map<HTMLElement, number>();
+    nodes.forEach(n => oldTops.set(n, n.getBoundingClientRect().top));
+    // Measure the future without ever painting it: apply, read, revert.
+    const prevInset = doc.style.getPropertyValue('--keyboard-inset-height');
+    applyInset();
+    const lasts = new Map<HTMLElement, number>();
+    nodes.forEach(n => lasts.set(n, n.getBoundingClientRect().top));
+    doc.style.setProperty('--keyboard-inset-height', prevInset);
+    // Start state: each node at its current visual position in the old layout.
+    nodes.forEach(n => {
+      const start = (firsts.get(n) ?? 0) - (oldTops.get(n) ?? 0);
+      n.style.transform = layered.has(n)
+        ? `translate3d(0, ${start}px, 0)`
+        : start
+          ? `translateY(${start}px)`
+          : '';
+    });
+    // Flush so the start transform becomes the transition's start value.
+    void doc.getBoundingClientRect();
+    // Play: glide to where the final layout will land each node; the settle
+    // applies that layout in the same paint that drops the transforms.
+    nodes.forEach(n => {
+      const oldTop = oldTops.get(n) ?? 0;
+      const end = (lasts.get(n) ?? oldTop) - oldTop;
+      n.style.transition = `transform ${durationMs}ms ${CURVE}`;
+      n.style.transform = layered.has(n)
+        ? `translate3d(0, ${end}px, 0)`
+        : end
+          ? `translateY(${end}px)`
+          : '';
+    });
+    scheduleSettle(nodes, durationMs, generation, true);
+    return;
+  }
+
   // Last: the single reflow to the final layout.
   applyInset();
   // Invert: put each node back where it visually was.
@@ -162,7 +237,7 @@ onKeyboardWillShow(({ height, durationMs }) => {
   keyboardHeight = height;
   lastDurationMs = durationMs;
   clearPendingKeyboard();
-  if (!surfaceOpen) flip(durationMs);
+  if (!surfaceOpen) flip(durationMs, true);
 });
 onKeyboardWillHide(({ durationMs }) => {
   keyboardHeight = 0;
