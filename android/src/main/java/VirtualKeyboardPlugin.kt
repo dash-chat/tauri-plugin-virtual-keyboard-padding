@@ -7,6 +7,7 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import app.tauri.plugin.Invoke
+import androidx.core.graphics.Insets
 import androidx.core.view.OnApplyWindowInsetsListener
 import android.webkit.WebView
 import androidx.core.view.ViewCompat
@@ -38,6 +39,32 @@ class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
                 v.scrollTo(0, 0)
             }
         }
+
+        // Chromium derives env(safe-area-inset-*) from the insets dispatched to
+        // the WebView, and zeroes the bottom safe area while the IME is up —
+        // mid-animation, one frame before willShow reaches JS — so any
+        // env()-based padding visible near the keyboard collapses and jumps.
+        // The page lays itself out against --keyboard-inset-height instead, so
+        // give the webview an IME-less view of the world: strip the IME from
+        // the insets it receives and block IME animation callbacks from
+        // propagating into it. The decor listeners below still see the real
+        // insets and feed the keyboard events.
+        ViewCompat.setOnApplyWindowInsetsListener(webView) { v, insets ->
+            val stripped = WindowInsetsCompat.Builder(insets)
+                .setInsets(WindowInsetsCompat.Type.ime(), Insets.NONE)
+                .setVisible(WindowInsetsCompat.Type.ime(), false)
+                .build()
+            ViewCompat.onApplyWindowInsets(v, stripped)
+        }
+        ViewCompat.setWindowInsetsAnimationCallback(webView, object :
+            WindowInsetsAnimationCompat.Callback(
+                WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_STOP
+            ) {
+            override fun onProgress(
+                insets: WindowInsetsCompat,
+                runningAnimations: List<WindowInsetsAnimationCompat>
+            ): WindowInsetsCompat = insets
+        })
 
         // The webview keeps its full size and the IME overlays it; the page lays
         // itself out against the --keyboard-inset-height CSS variable the guest-js side

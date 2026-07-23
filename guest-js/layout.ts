@@ -1,8 +1,14 @@
 import { watcher } from 'signalium';
 
 import { hideCaret, restoreCaret } from './caret';
-import { hideKeyboard } from './commands';
-import { keyboard, onKeyboardWillHide, onKeyboardWillShow } from './keyboard';
+import { showKeyboard } from './commands';
+import {
+  keyboard,
+  onKeyboardWillHide,
+  onKeyboardWillShow,
+  retractKeyboard,
+  setBandFloor,
+} from './keyboard';
 
 const IS_ANDROID =
   typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
@@ -17,15 +23,16 @@ const IS_ANDROID =
 // background band, so the clamp is chosen to stay just behind. iOS keeps the
 // historical approximation of its keyboard curve and its reported duration.
 const CURVE = IS_ANDROID
-  ? 'cubic-bezier(0.05, 0.7, 0.1, 1)'
+  ? 'cubic-bezier(0.2, 0, 0, 1)'
   : 'cubic-bezier(0.38, 0.7, 0.125, 1)';
-const ANDROID_MAX_GLIDE_MS = 150;
+const ANDROID_MAX_GLIDE_MS = 160;
 
 function glideDuration(durationMs: number): number {
   return IS_ANDROID ? Math.min(durationMs, ANDROID_MAX_GLIDE_MS) : durationMs;
 }
 
 const nodes = new Set<HTMLElement>();
+const previewMeasureCallbacks = new Map<HTMLElement, () => void>();
 
 // Bumped per flip so a glide that's been superseded doesn't run its tail work.
 let flipGeneration = 0;
@@ -124,6 +131,9 @@ function flip(durationMs: number, layoutAtEnd = false) {
 
   const firsts = new Map<HTMLElement, number>();
   // First: current visual position (accounts for a transform still in flight).
+  const hadTransform = Array.from(nodes).some(
+    n => n.style.transform !== '' && n.style.transform !== 'none',
+  );
   nodes.forEach(n => firsts.set(n, n.getBoundingClientRect().top));
   // Drop any in-flight transform so the next read is the true post-layout spot.
   nodes.forEach(n => {
@@ -133,17 +143,33 @@ function flip(durationMs: number, layoutAtEnd = false) {
 
   if (layoutAtEnd) {
     const doc = document.documentElement;
-    // Where the old layout puts each node untransformed (differs from `firsts`
-    // only when a glide was in flight).
-    const oldTops = new Map<HTMLElement, number>();
-    nodes.forEach(n => oldTops.set(n, n.getBoundingClientRect().top));
+    // Where the old layout puts each node untransformed. Only differs from
+    // `firsts` when a glide was in flight, so the extra layout pass is skipped
+    // otherwise — this whole handler runs in the willShow hot path, and every
+    // forced reflow here delays the frame that starts the glide.
+    const oldTops = hadTransform ? new Map<HTMLElement, number>() : firsts;
+    if (hadTransform) {
+      nodes.forEach(n => oldTops.set(n, n.getBoundingClientRect().top));
+    }
     // Measure the future without ever painting it: apply, read, revert.
     const prevInset = doc.style.getPropertyValue('--keyboard-inset-height');
     applyInset();
     const lasts = new Map<HTMLElement, number>();
     nodes.forEach(n => lasts.set(n, n.getBoundingClientRect().top));
+    // The settled layout is real (and already flushed) right now and observers
+    // will never see it before the glide ends — this is the one moment
+    // registrants can derive state from it. try/catch so a throwing callback
+    // can't skip the revert below and leave the inset applied early.
+    previewMeasureCallbacks.forEach(cb => {
+      try {
+        cb();
+      } catch (e) {
+        console.error(e);
+      }
+    });
+    // Revert and set the start state together — one flush establishes both as
+    // the transition's before-change style.
     doc.style.setProperty('--keyboard-inset-height', prevInset);
-    // Start state: each node at its current visual position in the old layout.
     nodes.forEach(n => {
       const start = (firsts.get(n) ?? 0) - (oldTops.get(n) ?? 0);
       n.style.transform = layered.has(n)
@@ -152,29 +178,37 @@ function flip(durationMs: number, layoutAtEnd = false) {
           ? `translateY(${start}px)`
           : '';
     });
-    // Flush so the start transform becomes the transition's start value.
     void doc.getBoundingClientRect();
-    // Play: glide to where the final layout will land each node; the settle
-    // applies that layout in the same paint that drops the transforms.
-    nodes.forEach(n => {
-      const oldTop = oldTops.get(n) ?? 0;
-      const end = (lasts.get(n) ?? oldTop) - oldTop;
-      n.style.transition = `transform ${durationMs}ms ${CURVE}`;
-      n.style.transform = layered.has(n)
-        ? `translate3d(0, ${end}px, 0)`
-        : end
-          ? `translateY(${end}px)`
-          : '';
+    // Play on the next frame: transitions backdate their start to the style
+    // change's timestamp, so starting inside this (expensive) task would burn
+    // the first chunk of the animation while the frame is still being
+    // produced — the content would visibly teleport to wherever the timeline
+    // already reached. A rAF starts the glide on a freshly-committed frame.
+    requestAnimationFrame(() => {
+      if (generation !== flipGeneration) return;
+      nodes.forEach(n => {
+        const oldTop = oldTops.get(n) ?? 0;
+        const end = (lasts.get(n) ?? oldTop) - oldTop;
+        n.style.transition = `transform ${durationMs}ms ${CURVE}`;
+        n.style.transform = layered.has(n)
+          ? `translate3d(0, ${end}px, 0)`
+          : end
+            ? `translateY(${end}px)`
+            : '';
+      });
+      scheduleSettle(nodes, durationMs, generation, true);
     });
-    scheduleSettle(nodes, durationMs, generation, true);
     return;
   }
 
-  // Last: the single reflow to the final layout.
+  // Last: the single reflow to the final layout. All reads before all writes —
+  // interleaving them forces one reflow per node.
   applyInset();
+  const lasts = new Map<HTMLElement, number>();
+  nodes.forEach(n => lasts.set(n, n.getBoundingClientRect().top));
   // Invert: put each node back where it visually was.
   nodes.forEach(n => {
-    const last = n.getBoundingClientRect().top;
+    const last = lasts.get(n) ?? 0;
     const delta = (firsts.get(n) ?? last) - last;
     n.style.transform = layered.has(n)
       ? `translate3d(0, ${delta}px, 0)`
@@ -184,22 +218,35 @@ function flip(durationMs: number, layoutAtEnd = false) {
   });
   // Flush so the inverted transform becomes the transition's start value.
   void document.documentElement.getBoundingClientRect();
-  // Play: glide to the final position on the compositor.
-  nodes.forEach(n => {
-    n.style.transition = `transform ${durationMs}ms ${CURVE}`;
-    n.style.transform = layered.has(n) ? 'translate3d(0, 0, 0)' : '';
+  // Play on the next frame — same reason as the show path: transitions
+  // backdate their start to the style change's timestamp, and this handler's
+  // reflows plus the app's resize observers make the frame late, so an
+  // in-task start burns the first chunk of the animation and the content
+  // visibly teleports through it. The inverse transforms painted this frame
+  // keep everything looking unmoved until the glide begins.
+  requestAnimationFrame(() => {
+    if (generation !== flipGeneration) return;
+    nodes.forEach(n => {
+      n.style.transition = `transform ${durationMs}ms ${CURVE}`;
+      n.style.transform = layered.has(n) ? 'translate3d(0, 0, 0)' : '';
+    });
+    scheduleSettle(nodes, durationMs, generation);
   });
-  if (layered.size > 0) scheduleSettle(layered, durationMs, generation);
 }
 
-// The keyboard and a below-keyboard surface (e.g. a media panel) share one
-// bottom slot: the surface takes it over when open (a "keyboard" of its own
-// height), otherwise the keyboard owns it. --keyboard-inset-height reflects whichever
-// is active, so everything registered above is lifted the same way either way.
+// The keyboard, below-keyboard surfaces (e.g. a media panel), and slot holds
+// share one bottom slot: while any claim is active the slot owns the reserved
+// height in the keyboard's place, otherwise the keyboard owns it.
+// --keyboard-inset-height reflects whichever is active, so everything
+// registered above is lifted the same way either way.
 let keyboardHeight = 0;
-let surfaceOpen = false;
+const slotClaims = new Set<object>();
 let surfaceHeight = 0;
 let lastDurationMs = 250;
+
+function slotClaimed(): boolean {
+  return slotClaims.size > 0;
+}
 
 // When the surface closes while handing focus to an input, a keyboard is rising
 // to reclaim the slot — but its native `willShow` arrives a few frames later.
@@ -214,6 +261,34 @@ function clearPendingKeyboard() {
   clearTimeout(pendingKeyboardTimer);
 }
 
+// A below-keyboard surface released into the swap hold: it stays at full height
+// — visible under the rising keyboard — until the keyboard has covered it, then
+// collapses and notifies its owner (which unmounts the content).
+let heldSurface: { node: HTMLElement; onHidden?: () => void } | null = null;
+let heldSurfaceTimer: ReturnType<typeof setTimeout> | undefined;
+
+function dropHeldSurface(node?: HTMLElement) {
+  if (node && heldSurface?.node !== node) return;
+  heldSurface = null;
+  clearTimeout(heldSurfaceTimer);
+}
+
+/** Collapse the held surface once the keyboard has had `delayMs` to cover it.
+ * The hold stays registered until the collapse actually runs, so a re-open in
+ * the delay window (`dropHeldSurface`) can still cancel it — nulling it up
+ * front would leave an orphaned timer that collapses the re-opened surface. */
+function resolveHeldSurface(delayMs: number) {
+  const held = heldSurface;
+  if (!held) return;
+  clearTimeout(heldSurfaceTimer);
+  heldSurfaceTimer = setTimeout(() => {
+    if (heldSurface !== held) return;
+    heldSurface = null;
+    held.node.style.height = '0px';
+    held.onHidden?.();
+  }, delayMs);
+}
+
 function editableFocused() {
   const el = document.activeElement;
   return (
@@ -225,7 +300,7 @@ function editableFocused() {
 }
 
 function applyInset() {
-  const px = surfaceOpen || pendingKeyboard ? surfaceHeight : keyboardHeight;
+  const px = slotClaimed() || pendingKeyboard ? surfaceHeight : keyboardHeight;
   document.documentElement.style.setProperty('--keyboard-inset-height', `${px}px`);
 }
 
@@ -237,36 +312,53 @@ onKeyboardWillShow(({ height, durationMs }) => {
   keyboardHeight = height;
   lastDurationMs = durationMs;
   clearPendingKeyboard();
-  if (!surfaceOpen) flip(durationMs, true);
+  // The keyboard reclaiming the slot covers the held surface as it rises;
+  // collapse it once the animation has passed over it.
+  resolveHeldSurface(glideDuration(durationMs) + 50);
+  if (!slotClaimed()) flip(durationMs, true);
 });
 onKeyboardWillHide(({ durationMs }) => {
   keyboardHeight = 0;
   lastDurationMs = durationMs;
   clearPendingKeyboard();
-  if (!surfaceOpen) flip(durationMs);
+  resolveHeldSurface(0);
+  if (!slotClaimed()) flip(durationMs);
 });
 
-/** Report a surface opening/closing below the keyboard: while open it owns the
- *  bottom slot at `height`, in the keyboard's place, and the FLIP glides
- *  everything registered above to match. */
-function setBelowKeyboardSurface(open: boolean) {
+/** Add or drop one claimant's claim on the bottom slot: while any claim is
+ *  active the slot owns the reserved height in the keyboard's place, and the
+ *  FLIP glides everything registered above to match. Returns true when the
+ *  release entered the swap hold — the slot stays reserved for the rising
+ *  keyboard. */
+function setSlotClaim(claim: object, active: boolean): boolean {
   surfaceHeight = keyboard.reservedHeight.value;
-  if (open === surfaceOpen) return;
-  surfaceOpen = open;
-  // Closing straight into a focused input (the surface→keyboard swap): hold the
-  // reserved inset until `willShow` lands so nothing dips. A backstop clears the
-  // hold in case no keyboard rises (e.g. a hardware keyboard is attached).
-  if (!open && keyboardHeight === 0 && editableFocused()) {
+  const wasClaimed = slotClaimed();
+  if (active) slotClaims.add(claim);
+  else slotClaims.delete(claim);
+  if (slotClaimed() === wasClaimed) return false;
+  // Claiming retracts a live keyboard so the slot — not the keyboard — owns
+  // the space.
+  if (active) retractKeyboard();
+  // Releasing straight into a focused input (the slot→keyboard swap): hold the
+  // reserved inset until `willShow` lands so nothing dips, and summon the
+  // keyboard explicitly — on Android a programmatic focus() does not raise the
+  // IME, so without the native show the hold would just sit out its backstop
+  // as an empty slot. A backstop clears the hold in case no keyboard rises
+  // anyway (e.g. a hardware keyboard is attached).
+  if (!active && keyboardHeight === 0 && editableFocused()) {
     pendingKeyboard = true;
     clearTimeout(pendingKeyboardTimer);
     pendingKeyboardTimer = setTimeout(() => {
       pendingKeyboard = false;
+      resolveHeldSurface(0);
       flip(lastDurationMs);
     }, SWAP_BACKSTOP_MS);
-    return;
+    void showKeyboard();
+    return true;
   }
   clearPendingKeyboard();
   flip(lastDurationMs);
+  return false;
 }
 
 /**
@@ -276,10 +368,26 @@ function setBelowKeyboardSurface(open: boolean) {
  *
  * Returns an unregister function.
  */
-export function registerAboveKeyboard(node: HTMLElement): () => void {
+export function registerAboveKeyboard(
+  node: HTMLElement,
+  opts?: {
+    /** On keyboard show the one-shot reflow is deferred to the end of the
+     * glide, so geometry-derived state (e.g. a navbar opacity keyed on scroll
+     * metrics) would lag the whole animation. This runs while the glide's
+     * final layout is applied invisibly for measurement, before the animation
+     * starts — read geometry freely, but write only paint-level styles
+     * (opacity, color): a layout-affecting write would corrupt the
+     * measurement. */
+    onPreviewLayoutMeasure?: () => void;
+  },
+): () => void {
   nodes.add(node);
+  if (opts?.onPreviewLayoutMeasure) {
+    previewMeasureCallbacks.set(node, opts.onPreviewLayoutMeasure);
+  }
   return () => {
     nodes.delete(node);
+    previewMeasureCallbacks.delete(node);
   };
 }
 
@@ -301,18 +409,51 @@ export interface BelowKeyboardSurface {
  * passed to `registerAboveKeyboard` — a registered ancestor's transform would drag
  * this node along instead of leaving it pinned, and would break `position: fixed`.
  */
-export function registerBelowKeyboard(node: HTMLElement): BelowKeyboardSurface {
+export function registerBelowKeyboard(
+  node: HTMLElement,
+  opts?: {
+    /** The surface's region is no longer visible — collapsed with no keyboard
+     * coming, or covered by the risen keyboard after a swap. The owner can
+     * unmount the surface's content now without it visibly vanishing. */
+    onHidden?: () => void;
+  },
+): BelowKeyboardSurface {
   // The height is animated to and from 0, so content taller than the current
   // height has to be clipped rather than spill past it.
   node.style.overflow = 'hidden';
 
+  const claim = {};
   let open = false;
   let destroyed = false;
 
+  let visible = false;
+  const hidden = () => {
+    visible = false;
+    opts?.onHidden?.();
+  };
+
   const sync = () => {
     const reserved = keyboard.reservedHeight.value;
-    node.style.height = open ? `${reserved}px` : '0px';
-    setBelowKeyboardSurface(open);
+    if (open) {
+      // Re-opening cancels a pending covered-collapse from a previous swap.
+      dropHeldSurface(node);
+      visible = true;
+      node.style.height = `${reserved}px`;
+      setSlotClaim(claim, true);
+      return;
+    }
+    const held = setSlotClaim(claim, false);
+    if (held) {
+      // Swap hold: keep the surface at full height, visible under the rising
+      // keyboard; the willShow/backstop resolution collapses it once covered.
+      heldSurface = { node, onHidden: hidden };
+      return;
+    }
+    // A hold in progress owns the height until its resolution collapses it —
+    // a re-sync (e.g. reservedHeight changing) must not cut it short.
+    if (heldSurface?.node === node) return;
+    node.style.height = '0px';
+    if (visible) hidden();
   };
 
   // Re-sync if the reserved height is learned/changes while mounted.
@@ -327,18 +468,55 @@ export function registerBelowKeyboard(node: HTMLElement): BelowKeyboardSurface {
       if (destroyed || next === open) return;
       open = next;
       sync();
-      // Opening straight over a live keyboard: drop focus and retract it so this
-      // surface — not the keyboard — owns the slot.
-      if (open && keyboard.isOpen.value) {
-        (document.activeElement as HTMLElement | null)?.blur();
-        void hideKeyboard();
-      }
     },
     destroy() {
       if (destroyed) return;
       destroyed = true;
       unsubscribe();
-      if (open) setBelowKeyboardSurface(false);
+      dropHeldSurface(node);
+      if (open) setSlotClaim(claim, false);
+    },
+  };
+}
+
+export interface KeyboardSlotHold {
+  /** Give the slot back. `restoreFocus` refocuses the element that was focused
+   * at hold time and summons the keyboard into the still-held slot, so nothing
+   * above dips during the swap. Idempotent. */
+  release(opts?: { restoreFocus?: boolean }): void;
+}
+
+const inertHold: KeyboardSlotHold = { release() {} };
+
+/**
+ * Retract the keyboard without giving up its slot: `--keyboard-inset-height`
+ * keeps the reserved height and the background band keeps the keyboard's
+ * region painted, so the layout above stays put with no surface of its own —
+ * e.g. under an overlay that dims the chat but must not collapse the composer.
+ * When the keyboard is closed there is no space to preserve and the returned
+ * hold is inert, so callers can hold and release unconditionally.
+ */
+export function holdKeyboardSlot(): KeyboardSlotHold {
+  if (!keyboard.isOpen.value) return inertHold;
+  // Captured before the claim blurs it, to give focus back on release.
+  const active = document.activeElement;
+  const focused = active instanceof HTMLElement ? active : null;
+  const claim = {};
+  setSlotClaim(claim, true);
+  setBandFloor(surfaceHeight);
+  let released = false;
+  return {
+    release({ restoreFocus = false } = {}) {
+      if (released) return;
+      released = true;
+      setBandFloor(0);
+      // Focus first: the claim release then sees the focused editable and holds
+      // the inset until the rising keyboard's `willShow` reclaims it.
+      if (restoreFocus && focused) {
+        focused.focus({ preventScroll: true });
+        void showKeyboard();
+      }
+      setSlotClaim(claim, false);
     },
   };
 }

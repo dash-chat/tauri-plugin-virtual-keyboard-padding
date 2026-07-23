@@ -1,6 +1,8 @@
 import { addPluginListener } from '@tauri-apps/api/core';
 import { signal, reactiveSignal, type ReadonlySignal } from 'signalium';
 
+import { hideKeyboard } from './commands';
+
 const FALLBACK_HEIGHT = 270;
 const STORAGE_KEY = 'virtual-keyboard:keyboard-height';
 
@@ -19,17 +21,38 @@ const open = signal(false);
 const maxHeight = signal(0);
 let tracking = false;
 let band: HTMLElement | null = null;
+let bandFloor = 0;
 
 const willShowListeners = new Set<(event: KeyboardWillShowEvent) => void>();
 const willHideListeners = new Set<(event: KeyboardWillHideEvent) => void>();
+
+function bandHeight(): number {
+  return Math.max(height.value, bandFloor);
+}
+
+/** Keep the band painted at least `px` tall even while the keyboard is down —
+ * a held slot's region must stay covered after the keyboard retracts from it.
+ * Pass 0 to let the band follow the keyboard again. Module-internal (used by
+ * the layout slot), not part of the public API. */
+export function setBandFloor(px: number) {
+  bandFloor = px;
+  if (band) band.style.height = `${bandHeight()}px`;
+}
 
 function setState(nextHeight: number, nextOpen: boolean) {
   height.value = nextHeight;
   open.value = nextOpen;
   if (band) {
-    band.style.height = `${nextHeight}px`;
+    band.style.height = `${bandHeight()}px`;
     // Re-sample on each show so the band follows theme/route changes for free.
-    if (nextHeight > 0) band.style.background = detectFillColor();
+    // Deferred: the hit-test forces layout, and this runs in the willShow hot
+    // path where every ms delays the frame that starts the glide. The band is
+    // behind the keyboard when sampling lands, so a late color is invisible.
+    if (nextHeight > 0) {
+      requestAnimationFrame(() => {
+        if (band && height.value > 0) band.style.background = detectFillColor();
+      });
+    }
   }
 }
 
@@ -66,7 +89,7 @@ function ensureKeyboardBand() {
     'position:fixed;bottom:0;inset-inline:0;height:0;' +
     'background:transparent;pointer-events:none;';
   document.body.prepend(band);
-  band.style.height = `${height.value}px`;
+  band.style.height = `${bandHeight()}px`;
 }
 
 function adoptHeight(candidate: number) {
@@ -107,6 +130,19 @@ export function trackKeyboardHeight() {
     if (event.height > 0) adoptHeight(event.height);
     setState(event.height, event.height > 0);
   });
+}
+
+/** Retract an open keyboard, blurring the focused input so it doesn't
+ * immediately rise again. No-op while the keyboard is closed. Use before
+ * showing a surface that replaces the keyboard (a sheet, an overlay); slot
+ * claimants (`registerBelowKeyboard`, `holdKeyboardSlot`) retract this way on
+ * their own. */
+export function retractKeyboard() {
+  if (!open.value) return;
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+  void hideKeyboard();
 }
 
 /** Subscribe to the native will-show notification, which arrives with the
