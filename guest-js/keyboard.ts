@@ -26,20 +26,45 @@ const willHideListeners = new Set<(event: KeyboardWillHideEvent) => void>();
 function setState(nextHeight: number, nextOpen: boolean) {
   height.value = nextHeight;
   open.value = nextOpen;
-  if (band) band.style.height = `${nextHeight}px`;
+  if (band) {
+    band.style.height = `${nextHeight}px`;
+    // Re-sample on each show so the band follows theme/route changes for free.
+    if (nextHeight > 0) band.style.background = detectFillColor();
+  }
 }
 
-/** Paint the keyboard's region with the app surface (via the `--keyboard-fill`
- * CSS variable the app sets) so the keyboard's rounded corners blend into the
- * app instead of revealing the transparent-webview base. Sits behind the app
- * content and is zero-height whenever the keyboard is down, so it never covers a
- * full-bleed surface behind the webview — e.g. a QR scanner's camera feed. */
+/** Sample the app surface the keyboard's region overlaps, so the band can match
+ * it without the app pushing a color. Hit-tests just above the keyboard's top
+ * edge and returns the first full-width opaque background in the stack there.
+ * Uses `elementsFromPoint` (front-to-back), not an ancestor walk, so it still
+ * finds the page surface when it sits *behind* a transparent composer bar rather
+ * than being its ancestor — and the full-width test steps past inset, colored
+ * message bubbles. */
+function detectFillColor(): string {
+  if (typeof document === 'undefined') return 'transparent';
+  const x = Math.floor(window.innerWidth / 2);
+  const y = window.innerHeight - height.value - 2;
+  for (const el of document.elementsFromPoint(x, y)) {
+    const bg = getComputedStyle(el).backgroundColor;
+    const opaque = bg !== '' && bg !== 'transparent' && !bg.endsWith(', 0)');
+    const fullWidth =
+      el.getBoundingClientRect().width >= window.innerWidth * 0.9;
+    if (opaque && fullWidth) return bg;
+  }
+  return 'transparent';
+}
+
+/** Paint the keyboard's region with the app surface (detected from the content
+ * behind it) so the keyboard's rounded corners blend into the app instead of
+ * revealing the transparent-webview base. Sits behind the app content and is
+ * zero-height whenever the keyboard is down, so it never covers a full-bleed
+ * surface behind the webview — e.g. a QR scanner's camera feed. */
 function ensureKeyboardBand() {
   if (typeof document === 'undefined' || !document.body || band) return;
   band = document.createElement('div');
   band.style.cssText =
     'position:fixed;bottom:0;inset-inline:0;height:0;' +
-    'background:var(--keyboard-fill,transparent);pointer-events:none;';
+    'background:transparent;pointer-events:none;';
   document.body.prepend(band);
   band.style.height = `${height.value}px`;
 }

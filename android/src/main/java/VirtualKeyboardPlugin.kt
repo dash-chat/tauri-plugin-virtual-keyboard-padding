@@ -18,7 +18,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
     private var webView: WebView? = null
     private var animating = false
-    private var lastHeight = -1f
 
     override fun load(webView: WebView) {
         super.load(webView)
@@ -26,9 +25,9 @@ class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
         val rootView = activity.window.decorView
         val density = activity.resources.displayMetrics.density
 
-        // The webview keeps its full size and the IME overlays it; the page
-        // lays itself out against the --keyboard-height CSS variable this
-        // plugin maintains, and reacts to the keyboard events it emits.
+        // The webview keeps its full size and the IME overlays it; the page lays
+        // itself out against the --keyboard-inset-height CSS variable the guest-js side
+        // maintains from the keyboard events emitted here.
         ViewCompat.setOnApplyWindowInsetsListener(rootView,
             OnApplyWindowInsetsListener { _: View?, windowInsets: WindowInsetsCompat? ->
                 val ime = windowInsets!!.getInsets(WindowInsetsCompat.Type.ime())
@@ -37,13 +36,11 @@ class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
                     webView.scrollTo(0, 0)
                 }
 
-                // Animated changes are driven per-frame by the callback below;
-                // this covers IMEs/settings where no animation runs.
+                // Animated changes are reported by the willShow/willHide pair
+                // below; this covers IMEs/settings where no animation runs.
                 if (!animating) {
-                    val height = ime.bottom / density
-                    setKeyboardHeightVar(height)
                     val data = JSObject()
-                    data.put("height", height)
+                    data.put("height", ime.bottom / density)
                     trigger("change", data)
                 }
 
@@ -80,21 +77,18 @@ class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
                 return bounds
             }
 
+            // Required override. The per-frame insets are deliberately ignored:
+            // --keyboard-inset-height is set once from the target height reported by
+            // onStart, and the guest-js side glides the layout on the compositor.
             override fun onProgress(
                 insets: WindowInsetsCompat,
                 runningAnimations: List<WindowInsetsAnimationCompat>
-            ): WindowInsetsCompat {
-                setKeyboardHeightVar(
-                    insets.getInsets(WindowInsetsCompat.Type.ime()).bottom / density
-                )
-                return insets
-            }
+            ): WindowInsetsCompat = insets
 
             override fun onEnd(animation: WindowInsetsAnimationCompat) {
                 if ((animation.typeMask and WindowInsetsCompat.Type.ime()) != 0) {
                     animating = false
                     val height = imeHeight(rootView) / density
-                    setKeyboardHeightVar(height)
                     val data = JSObject()
                     if (height > 0) {
                         data.put("height", height)
@@ -110,15 +104,6 @@ class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
     private fun imeHeight(rootView: View): Int =
         ViewCompat.getRootWindowInsets(rootView)
             ?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
-
-    private fun setKeyboardHeightVar(height: Float) {
-        if (height == lastHeight) return
-        lastHeight = height
-        webView?.evaluateJavascript(
-            "document.documentElement.style.setProperty('--keyboard-height','${height}px')",
-            null
-        )
-    }
 
     @Command
     fun hide(invoke: Invoke) {

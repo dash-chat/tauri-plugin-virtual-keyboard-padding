@@ -48,7 +48,9 @@ Add the JS API to your frontend:
 
 The plugin never resizes the webview; the keyboard overlays it. Instead it:
 
-1. Maintains a `--keyboard-height` CSS variable on `document.documentElement`, updated **per frame** during keyboard animations (Android: `WindowInsetsAnimationCompat` progress; iOS: display-link interpolation over the keyboard notification's duration). Lay your app out against it, e.g. `padding-bottom: var(--keyboard-height, 0px)` on the app shell.
+1. Maintains a `--keyboard-inset-height` CSS variable on `document.documentElement`, set **once** per keyboard transition from the target height `willShow` reports. Lay your app out against it, e.g. `padding-bottom: var(--keyboard-inset-height, 0px)` on the app shell.
+
+   One shot means the layout reflows exactly once, rather than once per frame — a per-frame reflow is what makes a long list (especially a `column-reverse` one) lag and tremble as the keyboard moves. The smooth motion comes instead from `registerAboveKeyboard`, which FLIPs the nodes you register onto the compositor so they *glide* into place in sync with the native keyboard. **Anything laid out against the variable but not registered jumps to its final position instead of tracking the keyboard.**
 2. Emits keyboard events consumed by the JS API: `willShow { height, durationMs }` (before the open animation, with the target height in CSS px), `willHide { durationMs }`, `didShow { height }`, `didHide`, and `change { height }` for non-animated changes.
 3. Exposes native `hide`/`show` commands (`WindowInsetsControllerCompat.hide/show(ime())` on Android, `endEditing` on iOS) so the app never has to manipulate the keyboard through DOM focus tricks.
 
@@ -68,7 +70,9 @@ import {
   onKeyboardWillHide,
 } from 'tauri-plugin-virtual-keyboard';
 
-trackKeyboardHeight(); // once at startup
+// Tracking starts automatically on import; call this only if you need to be
+// explicit about when it happens. Idempotent.
+trackKeyboardHeight();
 
 keyboard.height.value;         // CSS px, settles at animation endpoints
 keyboard.isOpen.value;
@@ -77,6 +81,33 @@ keyboard.reservedHeight.value; // largest height seen, persisted; fallback befor
 await hideKeyboard();          // retract via the OS
 await showKeyboard();          // summon for the currently focused input (Android)
 ```
+
+### Layout
+
+Keyboard-driven layout changes are animated by FLIP rather than by reflowing every
+frame. The API is imperative (no framework dependency); wrap it in whatever your
+framework calls a directive.
+
+```ts
+import {
+  registerAboveKeyboard,
+  registerBelowKeyboard,
+} from 'tauri-plugin-virtual-keyboard';
+
+// Glide this node when the keyboard (or a below-keyboard surface) moves.
+const unregister = registerAboveKeyboard(node);
+
+// Render a node in the keyboard's place — a media/emoji panel that takes the
+// keyboard's slot. Opening over a live keyboard retracts the keyboard first.
+// Only the height is managed; pin the node to the viewport bottom yourself.
+const surface = registerBelowKeyboard(node);
+surface.setOpen(true);
+surface.destroy();
+```
+
+A below-keyboard node must not be inside a node passed to `registerAboveKeyboard`:
+the registered ancestor's transform would drag it along instead of leaving it
+pinned, and would break its `position: fixed`. Make them siblings.
 
 ## License
 

@@ -11,7 +11,7 @@ class VirtualKeyboardPlugin: Plugin, UIScrollViewDelegate {
 
         // The webview keeps its full size with all automatic keyboard handling
         // disabled; the keyboard overlays it and the page lays itself out
-        // against the --keyboard-height CSS variable this plugin maintains.
+        // against the --keyboard-inset-height CSS variable this plugin maintains.
         webview.scrollView.contentInsetAdjustmentBehavior = .never
         webview.scrollView.automaticallyAdjustsScrollIndicatorInsets = false
         webview.scrollView.isScrollEnabled = false
