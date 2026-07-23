@@ -18,6 +18,7 @@ const height = signal(0);
 const open = signal(false);
 const maxHeight = signal(0);
 let tracking = false;
+let band: HTMLElement | null = null;
 
 const willShowListeners = new Set<(event: KeyboardWillShowEvent) => void>();
 const willHideListeners = new Set<(event: KeyboardWillHideEvent) => void>();
@@ -25,6 +26,22 @@ const willHideListeners = new Set<(event: KeyboardWillHideEvent) => void>();
 function setState(nextHeight: number, nextOpen: boolean) {
   height.value = nextHeight;
   open.value = nextOpen;
+  if (band) band.style.height = `${nextHeight}px`;
+}
+
+/** Paint the keyboard's region with the app surface (via the `--keyboard-fill`
+ * CSS variable the app sets) so the keyboard's rounded corners blend into the
+ * app instead of revealing the transparent-webview base. Sits behind the app
+ * content and is zero-height whenever the keyboard is down, so it never covers a
+ * full-bleed surface behind the webview — e.g. a QR scanner's camera feed. */
+function ensureKeyboardBand() {
+  if (typeof document === 'undefined' || !document.body || band) return;
+  band = document.createElement('div');
+  band.style.cssText =
+    'position:fixed;bottom:0;inset-inline:0;height:0;' +
+    'background:var(--keyboard-fill,transparent);pointer-events:none;';
+  document.body.prepend(band);
+  band.style.height = `${height.value}px`;
 }
 
 function adoptHeight(candidate: number) {
@@ -44,6 +61,7 @@ function listen<T>(event: string, handler: (payload: T) => void) {
 export function trackKeyboardHeight() {
   if (tracking || typeof window === 'undefined') return;
   tracking = true;
+  ensureKeyboardBand();
   const stored = Number(localStorage.getItem(STORAGE_KEY));
   if (stored > 0) maxHeight.value = stored;
   listen<KeyboardWillShowEvent>('willShow', event => {
@@ -85,8 +103,7 @@ export function onKeyboardWillHide(
 }
 
 /** Keyboard state as signalium signals, fed by the native events. Heights are
- * in CSS px and settle at the animation endpoints; per-frame layout should
- * consume the --keyboard-height CSS variable the plugin maintains instead. */
+ * in CSS px and settle at the animation endpoints. */
 export const keyboard: {
   height: ReadonlySignal<number>;
   isOpen: ReadonlySignal<boolean>;
@@ -98,3 +115,7 @@ export const keyboard: {
   isOpen: open,
   reservedHeight: reactiveSignal(() => maxHeight.value || FALLBACK_HEIGHT),
 };
+
+// Start tracking automatically on import — no app call needed. Idempotent and
+// SSR-guarded, so an explicit trackKeyboardHeight() elsewhere is a harmless no-op.
+trackKeyboardHeight();
