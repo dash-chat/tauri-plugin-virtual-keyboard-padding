@@ -1,7 +1,7 @@
 import { addPluginListener } from '@tauri-apps/api/core';
 import { signal, reactiveSignal, type ReadonlySignal } from 'signalium';
 
-import { hideKeyboard } from './commands';
+import { hideKeyboardCommand } from './commands';
 
 const FALLBACK_HEIGHT = 270;
 const STORAGE_KEY = 'virtual-keyboard:keyboard-height';
@@ -132,17 +132,18 @@ export function trackKeyboardHeight() {
   });
 }
 
-/** Retract an open keyboard, blurring the focused input so it doesn't
- * immediately rise again. No-op while the keyboard is closed. Use before
- * showing a surface that replaces the keyboard (a sheet, an overlay); slot
- * claimants (`registerBelowKeyboard`, `holdKeyboardSlot`) retract this way on
- * their own. */
-export function retractKeyboard() {
+/** Hide an open keyboard, blurring the focused input so it doesn't
+ * immediately rise again the next time the window regains focus. No-op while
+ * the keyboard is closed, so a focused input never loses its caret on
+ * platforms with no soft keyboard. `keepFocus` skips the blur — the input
+ * keeps its caret, at the risk of the OS summoning the keyboard back on the
+ * next window-focus event. */
+export function hideKeyboard({ keepFocus = false } = {}) {
   if (!open.value) return;
-  if (document.activeElement instanceof HTMLElement) {
+  if (!keepFocus && document.activeElement instanceof HTMLElement) {
     document.activeElement.blur();
   }
-  void hideKeyboard();
+  void hideKeyboardCommand();
 }
 
 /** Subscribe to the native will-show notification, which arrives with the

@@ -3,10 +3,10 @@ import { watcher } from 'signalium';
 import { hideCaret, restoreCaret } from './caret';
 import { showKeyboard } from './commands';
 import {
+  hideKeyboard,
   keyboard,
   onKeyboardWillHide,
   onKeyboardWillShow,
-  retractKeyboard,
   setBandFloor,
 } from './keyboard';
 
@@ -338,7 +338,7 @@ function setSlotClaim(claim: object, active: boolean): boolean {
   if (slotClaimed() === wasClaimed) return false;
   // Claiming retracts a live keyboard so the slot — not the keyboard — owns
   // the space.
-  if (active) retractKeyboard();
+  if (active) hideKeyboard();
   // Releasing straight into a focused input (the slot→keyboard swap): hold the
   // reserved inset until `willShow` lands so nothing dips, and summon the
   // keyboard explicitly — on Android a programmatic focus() does not raise the

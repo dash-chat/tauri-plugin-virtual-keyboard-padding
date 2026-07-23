@@ -1,7 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 
-/** Retract the soft keyboard via the OS. No-op on desktop. */
-export function hideKeyboard(): Promise<void> {
+/** Raw native hide — internal. Use `hideKeyboard` from `keyboard.ts`, which
+ * also blurs the focused input so the keyboard doesn't immediately rise
+ * again. */
+export function hideKeyboardCommand(): Promise<void> {
   return invoke('plugin:virtual-keyboard|hide');
 }
 

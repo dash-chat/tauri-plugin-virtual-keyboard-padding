@@ -1,10 +1,10 @@
-export { hideKeyboard, showKeyboard } from './commands';
+export { showKeyboard } from './commands';
 
 export {
+  hideKeyboard,
   keyboard,
   onKeyboardWillShow,
   onKeyboardWillHide,
-  retractKeyboard,
   trackKeyboardHeight,
   type KeyboardWillShowEvent,
   type KeyboardWillHideEvent,
