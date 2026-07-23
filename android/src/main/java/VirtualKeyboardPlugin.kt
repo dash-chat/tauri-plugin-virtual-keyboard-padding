@@ -18,6 +18,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
     private var webView: WebView? = null
     private var animating = false
+    private var imeVisible = false
 
     override fun load(webView: WebView) {
         super.load(webView)
@@ -25,12 +26,26 @@ class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
         val rootView = activity.window.decorView
         val density = activity.resources.displayMetrics.density
 
+        // While the IME is up, Chromium lets touch drags pan the visual viewport
+        // (the webview is full-size underneath the keyboard), showing a huge
+        // scrollbar and dragging the page out of place. The page lays itself out
+        // against the inset instead, so pin the native scroll and never draw the
+        // webview's own scrollbars — all real scrolling is DOM-level.
+        webView.isVerticalScrollBarEnabled = false
+        webView.isHorizontalScrollBarEnabled = false
+        webView.setOnScrollChangeListener { v, _, scrollY, _, _ ->
+            if (imeVisible && (scrollY != 0 || v.scrollX != 0)) {
+                v.scrollTo(0, 0)
+            }
+        }
+
         // The webview keeps its full size and the IME overlays it; the page lays
         // itself out against the --keyboard-inset-height CSS variable the guest-js side
         // maintains from the keyboard events emitted here.
         ViewCompat.setOnApplyWindowInsetsListener(rootView,
             OnApplyWindowInsetsListener { _: View?, windowInsets: WindowInsetsCompat? ->
                 val ime = windowInsets!!.getInsets(WindowInsetsCompat.Type.ime())
+                imeVisible = ime.bottom > 0
 
                 if (ime.bottom > 0) {
                     webView.scrollTo(0, 0)
