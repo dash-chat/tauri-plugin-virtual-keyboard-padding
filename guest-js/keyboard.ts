@@ -111,6 +111,27 @@ function notifySettled(height: number) {
   for (const listener of settledListeners) listener(height);
 }
 
+let settleTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Adopt and forward a settled report only if it survives a debounce window.
+ * When a reopen lands between the hide and show animations of a keyboard
+ * swap, the insets dispatch in the gap still carries the animation hint —
+ * acting on it immediately glides the layout to a height the keyboard never
+ * takes AND poisons the settled height that willShow targets reconcile
+ * against. A will-show/will-hide animation cancels the pending report: the
+ * animation's own didShow/didHide supersedes it. */
+function queueSettled(height: number) {
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => {
+    adoptHeight(height);
+    notifySettled(height);
+  }, 120);
+}
+
+function cancelQueuedSettled() {
+  clearTimeout(settleTimer);
+}
+
 /** Subscribe to settled keyboard heights (didShow/change), which can differ
  * from the willShow target the glide was driven by. Module-internal (used by
  * the layout side), not part of the public API. */
@@ -148,24 +169,24 @@ export function trackKeyboardHeight() {
   const stored = Number(localStorage.getItem(STORAGE_KEY));
   if (stored > 0) settledHeight.value = stored;
   listen<KeyboardWillShowEvent>('willShow', event => {
+    cancelQueuedSettled();
     const reconciled = { ...event, height: reconcileTarget(event.height) };
     setState(reconciled.height, true);
     for (const listener of willShowListeners) listener(reconciled);
   });
   listen<KeyboardWillHideEvent>('willHide', event => {
+    cancelQueuedSettled();
     setState(0, false);
     for (const listener of willHideListeners) listener(event);
   });
   listen<{ height: number }>('didShow', event => {
-    adoptHeight(event.height);
     setState(event.height, true);
-    notifySettled(event.height);
+    queueSettled(event.height);
   });
   listen('didHide', () => setState(0, false));
   listen<{ height: number }>('change', event => {
-    adoptHeight(event.height);
     setState(event.height, event.height > 0);
-    notifySettled(event.height);
+    queueSettled(event.height);
   });
 }
 
