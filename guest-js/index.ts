@@ -2,6 +2,7 @@ export { showKeyboard } from './commands';
 
 export {
   hideKeyboard,
+  keepKeyboardOpen,
   keyboard,
   onKeyboardWillShow,
   onKeyboardWillHide,

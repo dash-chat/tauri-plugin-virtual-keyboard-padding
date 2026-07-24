@@ -1,9 +1,10 @@
-import { watcher } from 'signalium';
+import { signal, watcher, type ReadonlySignal } from 'signalium';
 
 import { hideCaret, restoreCaret } from './caret';
 import { showKeyboard } from './commands';
 import {
   hideKeyboard,
+  isEditable,
   keyboard,
   onKeyboardWillHide,
   onKeyboardWillShow,
@@ -290,18 +291,24 @@ function resolveHeldSurface(delayMs: number) {
 }
 
 function editableFocused() {
-  const el = document.activeElement;
-  return (
-    el instanceof HTMLElement &&
-    (el.tagName === 'INPUT' ||
-      el.tagName === 'TEXTAREA' ||
-      el.isContentEditable)
-  );
+  return isEditable(document.activeElement);
 }
 
 function applyInset() {
   const px = slotClaimed() || pendingKeyboard ? surfaceHeight : keyboardHeight;
   document.documentElement.style.setProperty('--keyboard-inset-height', `${px}px`);
+}
+
+// The keyboard-aware sibling of env(safe-area-inset-bottom): the bottom space
+// the app must not lay out into — the slot inset while occupied (the inset
+// always covers the safe area when active), the home-indicator inset
+// otherwise. Flips in the same reflow as the inset. Injected as CSS so env()
+// resolves natively; module load evaluates once, so this never doubles up.
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.textContent =
+    ':root{--keyboard-safe-bottom:max(var(--keyboard-inset-height,0px),env(safe-area-inset-bottom,0px))}';
+  document.head.appendChild(style);
 }
 
 // Register the FLIP with the keyboard events on module load. Pure and SSR-safe —
@@ -394,6 +401,10 @@ export function registerAboveKeyboard(
 export interface BelowKeyboardSurface {
   /** Open/close the surface, gliding everything registered above it. */
   setOpen(open: boolean): void;
+  /** Whether the surface's region is visible — open, or released into a swap
+   * hold and not yet covered by the risen keyboard. Keep the surface's content
+   * mounted while true so it doesn't visibly vanish mid-swap. */
+  visible: ReadonlySignal<boolean>;
   destroy(): void;
 }
 
@@ -409,15 +420,7 @@ export interface BelowKeyboardSurface {
  * passed to `registerAboveKeyboard` — a registered ancestor's transform would drag
  * this node along instead of leaving it pinned, and would break `position: fixed`.
  */
-export function registerBelowKeyboard(
-  node: HTMLElement,
-  opts?: {
-    /** The surface's region is no longer visible — collapsed with no keyboard
-     * coming, or covered by the risen keyboard after a swap. The owner can
-     * unmount the surface's content now without it visibly vanishing. */
-    onHidden?: () => void;
-  },
-): BelowKeyboardSurface {
+export function registerBelowKeyboard(node: HTMLElement): BelowKeyboardSurface {
   // The height is animated to and from 0, so content taller than the current
   // height has to be clipped rather than spill past it.
   node.style.overflow = 'hidden';
@@ -426,10 +429,9 @@ export function registerBelowKeyboard(
   let open = false;
   let destroyed = false;
 
-  let visible = false;
+  const visible = signal(false);
   const hidden = () => {
-    visible = false;
-    opts?.onHidden?.();
+    visible.value = false;
   };
 
   const sync = () => {
@@ -437,7 +439,7 @@ export function registerBelowKeyboard(
     if (open) {
       // Re-opening cancels a pending covered-collapse from a previous swap.
       dropHeldSurface(node);
-      visible = true;
+      visible.value = true;
       node.style.height = `${reserved}px`;
       setSlotClaim(claim, true);
       return;
@@ -453,7 +455,7 @@ export function registerBelowKeyboard(
     // a re-sync (e.g. reservedHeight changing) must not cut it short.
     if (heldSurface?.node === node) return;
     node.style.height = '0px';
-    if (visible) hidden();
+    hidden();
   };
 
   // Re-sync if the reserved height is learned/changes while mounted.
@@ -464,6 +466,7 @@ export function registerBelowKeyboard(
   sync();
 
   return {
+    visible,
     setOpen(next: boolean) {
       if (destroyed || next === open) return;
       open = next;

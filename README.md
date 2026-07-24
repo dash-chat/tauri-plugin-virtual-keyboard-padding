@@ -51,6 +51,8 @@ The plugin never resizes the webview; the keyboard overlays it. Instead it:
 1. Maintains a `--keyboard-inset-height` CSS variable on `document.documentElement`, set **once** per keyboard transition from the target height `willShow` reports. Lay your app out against it, e.g. `padding-bottom: var(--keyboard-inset-height, 0px)` on the app shell.
 
    One shot means the layout reflows exactly once, rather than once per frame — a per-frame reflow is what makes a long list (especially a `column-reverse` one) lag and tremble as the keyboard moves. The smooth motion comes instead from `registerAboveKeyboard`, which FLIPs the nodes you register onto the compositor so they *glide* into place in sync with the native keyboard. **Anything laid out against the variable but not registered jumps to its final position instead of tracking the keyboard.**
+
+   Also injects `--keyboard-safe-bottom` — `max(--keyboard-inset-height, env(safe-area-inset-bottom))`, the bottom space the app must not lay out into: the keyboard/slot inset while occupied, the home-indicator safe area otherwise. The keyboard-aware replacement for `env(safe-area-inset-bottom)` in bottom padding.
 2. Emits keyboard events consumed by the JS API: `willShow { height, durationMs }` (before the open animation, with the target height in CSS px), `willHide { durationMs }`, `didShow { height }`, `didHide`, and `change { height }` for non-animated changes.
 3. Exposes native `hide`/`show` commands (`WindowInsetsControllerCompat.hide/show(ime())` on Android, `endEditing` on iOS) so the app never has to manipulate the keyboard through DOM focus tricks.
 

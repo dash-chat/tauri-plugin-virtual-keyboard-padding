@@ -132,6 +132,29 @@ export function trackKeyboardHeight() {
   });
 }
 
+/** Whether `el` is a text-entry element — one whose focus summons the
+ * keyboard. */
+export function isEditable(el: unknown): boolean {
+  return (
+    el instanceof HTMLElement &&
+    (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+  );
+}
+
+/** Keep taps inside `node` from moving focus off an editable, so the chrome
+ * around an input — buttons, panels, a scroll-to-bottom control — can be
+ * tapped without dismissing the keyboard. `mousedown`, not `pointerdown`:
+ * preventing `pointerdown`'s default suppresses the synthesized `click` on
+ * iOS, so the tapped control would never activate. Returns an unregister
+ * function. */
+export function keepKeyboardOpen(node: HTMLElement): () => void {
+  const onMousedown = (event: MouseEvent) => {
+    if (!isEditable(event.target)) event.preventDefault();
+  };
+  node.addEventListener('mousedown', onMousedown);
+  return () => node.removeEventListener('mousedown', onMousedown);
+}
+
 /** Hide an open keyboard, blurring the focused input so it doesn't
  * immediately rise again the next time the window regains focus. No-op while
  * the keyboard is closed, so a focused input never loses its caret on
