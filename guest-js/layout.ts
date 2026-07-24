@@ -6,6 +6,7 @@ import {
   hideKeyboard,
   isEditable,
   keyboard,
+  onKeyboardHeightSettled,
   onKeyboardWillHide,
   onKeyboardWillShow,
   setBandFloor,
@@ -332,20 +333,15 @@ onKeyboardWillHide(({ durationMs }) => {
   if (!slotClaimed()) flip(durationMs);
 });
 // The willShow target can differ from where the IME actually settles; the
-// settled height arrives later via didShow/change (reflected in
-// keyboard.height). Re-sync the inset then, or the layout keeps the stale
-// target offset from the keyboard edge for as long as the keyboard is up.
-// Also covers IMEs that resize or hide without an animation, which never
-// emit willShow/willHide.
-if (typeof window !== 'undefined') {
-  const settledHeight = watcher(() => keyboard.height.value);
-  settledHeight.addListener(() => {
-    const settled = keyboard.height.value;
-    if (settled === keyboardHeight) return;
-    keyboardHeight = settled;
-    if (!slotClaimed() && !pendingKeyboard) flip(lastDurationMs);
-  });
-}
+// settled height arrives later via didShow/change. Re-sync the inset then, or
+// the layout keeps the stale target offset from the keyboard edge for as long
+// as the keyboard is up. Also covers IMEs that resize or hide without an
+// animation, which never emit willShow/willHide.
+onKeyboardHeightSettled(settled => {
+  if (settled === keyboardHeight) return;
+  keyboardHeight = settled;
+  if (!slotClaimed() && !pendingKeyboard) flip(lastDurationMs);
+});
 
 /** Add or drop one claimant's claim on the bottom slot: while any claim is
  *  active the slot owns the reserved height in the keyboard's place, and the

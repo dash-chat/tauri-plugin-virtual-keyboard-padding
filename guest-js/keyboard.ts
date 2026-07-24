@@ -20,13 +20,14 @@ export interface KeyboardWillHideEvent {
 
 const height = signal(0);
 const open = signal(false);
-const maxHeight = signal(0);
+const settledHeight = signal(0);
 let tracking = false;
 let band: HTMLElement | null = null;
 let bandFloor = 0;
 
 const willShowListeners = new Set<(event: KeyboardWillShowEvent) => void>();
 const willHideListeners = new Set<(event: KeyboardWillHideEvent) => void>();
+const settledListeners = new Set<(height: number) => void>();
 
 function bandHeight(): number {
   return Math.max(height.value, bandFloor);
@@ -94,13 +95,30 @@ function ensureKeyboardBand() {
   band.style.height = `${bandHeight()}px`;
 }
 
-/** Adopt a settled keyboard height into the persisted maximum. Only settled
+/** Adopt a settled keyboard height as the reserved height. Only settled
  * heights (didShow/change) qualify — the willShow target can overshoot where
- * the IME actually settles and would poison the reserved height. */
+ * the IME actually settles. The latest settled value wins, not a running
+ * maximum: one over-reported settle would otherwise stick forever. */
 function adoptHeight(candidate: number) {
-  if (candidate <= maxHeight.value) return;
-  maxHeight.value = candidate;
+  if (candidate <= 0 || candidate === settledHeight.value) return;
+  settledHeight.value = candidate;
   localStorage.setItem(STORAGE_KEY, String(candidate));
+}
+
+/** Notify layout of a settled height (didShow/change). Synchronous — the
+ * layout must re-run its inset in the same task, not on a scheduler tick. */
+function notifySettled(height: number) {
+  for (const listener of settledListeners) listener(height);
+}
+
+/** Subscribe to settled keyboard heights (didShow/change), which can differ
+ * from the willShow target the glide was driven by. Module-internal (used by
+ * the layout side), not part of the public API. */
+export function onKeyboardHeightSettled(
+  listener: (height: number) => void,
+): () => void {
+  settledListeners.add(listener);
+  return () => settledListeners.delete(listener);
 }
 
 function listen<T>(event: string, handler: (payload: T) => void) {
@@ -116,7 +134,7 @@ export function trackKeyboardHeight() {
   tracking = true;
   ensureKeyboardBand();
   const stored = Number(localStorage.getItem(STORAGE_KEY));
-  if (stored > 0) maxHeight.value = stored;
+  if (stored > 0) settledHeight.value = stored;
   listen<KeyboardWillShowEvent>('willShow', event => {
     setState(event.height, true);
     for (const listener of willShowListeners) listener(event);
@@ -128,11 +146,13 @@ export function trackKeyboardHeight() {
   listen<{ height: number }>('didShow', event => {
     adoptHeight(event.height);
     setState(event.height, true);
+    notifySettled(event.height);
   });
   listen('didHide', () => setState(0, false));
   listen<{ height: number }>('change', event => {
-    if (event.height > 0) adoptHeight(event.height);
+    adoptHeight(event.height);
     setState(event.height, event.height > 0);
+    notifySettled(event.height);
   });
 }
 
@@ -202,7 +222,7 @@ export const keyboard: {
 } = {
   height,
   isOpen: open,
-  reservedHeight: reactiveSignal(() => maxHeight.value || FALLBACK_HEIGHT),
+  reservedHeight: reactiveSignal(() => settledHeight.value || FALLBACK_HEIGHT),
 };
 
 // Start tracking automatically on import — no app call needed. Idempotent and
