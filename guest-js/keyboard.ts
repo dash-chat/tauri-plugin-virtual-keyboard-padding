@@ -4,7 +4,9 @@ import { signal, reactiveSignal, type ReadonlySignal } from 'signalium';
 import { hideKeyboardCommand } from './commands';
 
 const FALLBACK_HEIGHT = 270;
-const STORAGE_KEY = 'virtual-keyboard:keyboard-height';
+// -v2: earlier versions persisted willShow target heights, which can overshoot
+// the settled IME inset (observed on Gboard); stored v1 values may be poisoned.
+const STORAGE_KEY = 'virtual-keyboard:keyboard-height-v2';
 
 export interface KeyboardWillShowEvent {
   /** Target keyboard height in CSS px. */
@@ -92,6 +94,9 @@ function ensureKeyboardBand() {
   band.style.height = `${bandHeight()}px`;
 }
 
+/** Adopt a settled keyboard height into the persisted maximum. Only settled
+ * heights (didShow/change) qualify — the willShow target can overshoot where
+ * the IME actually settles and would poison the reserved height. */
 function adoptHeight(candidate: number) {
   if (candidate <= maxHeight.value) return;
   maxHeight.value = candidate;
@@ -113,7 +118,6 @@ export function trackKeyboardHeight() {
   const stored = Number(localStorage.getItem(STORAGE_KEY));
   if (stored > 0) maxHeight.value = stored;
   listen<KeyboardWillShowEvent>('willShow', event => {
-    adoptHeight(event.height);
     setState(event.height, true);
     for (const listener of willShowListeners) listener(event);
   });
