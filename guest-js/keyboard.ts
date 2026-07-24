@@ -127,6 +127,18 @@ function listen<T>(event: string, handler: (payload: T) => void) {
   addPluginListener('virtual-keyboard', event, handler).catch(() => {});
 }
 
+/** Best guess of where the IME will settle. The willShow target comes from
+ * the insets-animation hint, which Gboard sometimes over-reports by ~34 CSS px
+ * relative to the settled inset — gliding to it overshoots and visibly
+ * resettles once didShow corrects. When the target is close to the last
+ * settled height, trust the settled one; a clearly different target (another
+ * IME, orientation change) wins. */
+function reconcileTarget(target: number): number {
+  const settled = settledHeight.value;
+  if (settled > 0 && Math.abs(target - settled) < 60) return settled;
+  return target;
+}
+
 /** Start maintaining the keyboard state from the plugin's native events.
  * Idempotent; call once at startup. */
 export function trackKeyboardHeight() {
@@ -136,8 +148,9 @@ export function trackKeyboardHeight() {
   const stored = Number(localStorage.getItem(STORAGE_KEY));
   if (stored > 0) settledHeight.value = stored;
   listen<KeyboardWillShowEvent>('willShow', event => {
-    setState(event.height, true);
-    for (const listener of willShowListeners) listener(event);
+    const reconciled = { ...event, height: reconcileTarget(event.height) };
+    setState(reconciled.height, true);
+    for (const listener of willShowListeners) listener(reconciled);
   });
   listen<KeyboardWillHideEvent>('willHide', event => {
     setState(0, false);
