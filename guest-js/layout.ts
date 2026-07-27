@@ -230,7 +230,13 @@ function flip(durationMs: number, layoutAtEnd = false, entering?: HTMLElement) {
   // has to clear is how far they actually go, and the app's bottom offset is
   // `--keyboard-safe-bottom` — a max() against the safe area, so it grows by
   // less than the inset does whenever the safe area was the larger of the two.
-  if (entering && travel) entering.style.transform = `translateY(${travel}px)`;
+  // translate3d, not translateY: the entering surface is `position: fixed`, and
+  // WebKit won't animate a transform transition on a fixed element unless it's
+  // promoted to its own compositor layer — with translateY it snaps to its final
+  // spot instead of gliding. The registered movers above are in flow, so plain
+  // translateY animates for them.
+  if (entering && travel)
+    entering.style.transform = `translate3d(0, ${travel}px, 0)`;
   const gliding = entering ? [...nodes, entering] : nodes;
   // Flush so the inverted transform becomes the transition's start value.
   void document.documentElement.getBoundingClientRect();
@@ -248,7 +254,7 @@ function flip(durationMs: number, layoutAtEnd = false, entering?: HTMLElement) {
     });
     if (entering) {
       entering.style.transition = `transform ${durationMs}ms ${CURVE}`;
-      entering.style.transform = '';
+      entering.style.transform = 'translate3d(0, 0, 0)';
     }
     scheduleSettle(gliding, durationMs, generation);
   });
