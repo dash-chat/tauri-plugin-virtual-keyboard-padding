@@ -17,6 +17,7 @@ import {
   hideKeyboard,
   isEditable,
   keyboard,
+  lastFocusedEditable,
   onKeyboardHeightSettled,
   onKeyboardWillHide,
   onKeyboardWillShow,
@@ -496,9 +497,13 @@ const inertHold: KeyboardSlotHold = { release() {} };
  */
 export function holdKeyboardSlot(): KeyboardSlotHold {
   if (!keyboard.isOpen.value) return inertHold;
-  // Captured before the claim blurs it, to give focus back on release.
+  // Captured before the claim blurs it, to give focus back on release. The
+  // keyboard is open, so an editable owns it — but on Android a hold taken
+  // from a long-press finds it already blurred (see lastFocusedEditable);
+  // restoring anything else (body, a button) would leave the re-summoned
+  // keyboard with no input to type into.
   const active = document.activeElement;
-  const focused = active instanceof HTMLElement ? active : null;
+  const focused = isEditable(active) ? active : lastFocusedEditable();
   const claim = {};
   setSlotClaim(claim, true);
   setBandFloor(surfaceHeight);
@@ -510,7 +515,9 @@ export function holdKeyboardSlot(): KeyboardSlotHold {
       setBandFloor(0);
       // Focus first: the claim release then sees the focused editable and holds
       // the inset until the rising keyboard's `willShow` reclaims it.
-      if (restoreFocus && focused) {
+      // isConnected: an element that left the DOM can't take focus — summoning
+      // the keyboard for it would leave typing dead-ended on body.
+      if (restoreFocus && focused?.isConnected) {
         focused.focus({ preventScroll: true });
         void showKeyboard();
       }

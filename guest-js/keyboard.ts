@@ -192,11 +192,29 @@ export function trackKeyboardHeight() {
 
 /** Whether `el` is a text-entry element — one whose focus summons the
  * keyboard. */
-export function isEditable(el: unknown): boolean {
+export function isEditable(el: unknown): el is HTMLElement {
   return (
     el instanceof HTMLElement &&
     (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
   );
+}
+
+let lastEditable: HTMLElement | null = null;
+
+/** The editable that most recently held focus — it may hold it still, or have
+ * just been blurred out from under the app: Android's native long-press
+ * processing blurs the focused input a few ms before the `contextmenu` event
+ * reaches the page, so a slot hold taken from a long-press reads
+ * `document.activeElement` too late. Module-internal (used by the layout
+ * slot), not part of the public API. */
+export function lastFocusedEditable(): HTMLElement | null {
+  return lastEditable;
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('focusin', event => {
+    if (isEditable(event.target)) lastEditable = event.target;
+  });
 }
 
 /** Keep taps inside `node` from moving focus off an editable, so the chrome
