@@ -1,5 +1,16 @@
 import { signal, watcher, type ReadonlySignal } from 'signalium';
 
+const insetTargetSignal = signal(0);
+
+/**
+ * The bottom inset the layout is heading to, in CSS px — updated synchronously
+ * at intent time (willShow/willHide/slot changes), before the reflow that
+ * applies it to `--keyboard-inset-height` (which the show path defers to the
+ * end of the glide). Geometry-derived state can correct mid-glide reads with
+ * `applied − target`, making the result independent of when it recomputes.
+ */
+export const insetTarget: ReadonlySignal<number> = insetTargetSignal;
+
 import { hideCaret, restoreCaret } from './caret';
 import { showKeyboard } from './commands';
 import {
@@ -34,7 +45,6 @@ function glideDuration(durationMs: number): number {
 }
 
 const nodes = new Set<HTMLElement>();
-const previewMeasureCallbacks = new Map<HTMLElement, () => void>();
 
 // Bumped per flip so a glide that's been superseded doesn't run its tail work.
 let flipGeneration = 0;
@@ -158,17 +168,6 @@ function flip(durationMs: number, layoutAtEnd = false) {
     applyInset();
     const lasts = new Map<HTMLElement, number>();
     nodes.forEach(n => lasts.set(n, n.getBoundingClientRect().top));
-    // The settled layout is real (and already flushed) right now and observers
-    // will never see it before the glide ends — this is the one moment
-    // registrants can derive state from it. try/catch so a throwing callback
-    // can't skip the revert below and leave the inset applied early.
-    previewMeasureCallbacks.forEach(cb => {
-      try {
-        cb();
-      } catch (e) {
-        console.error(e);
-      }
-    });
     // Revert and set the start state together — one flush establishes both as
     // the transition's before-change style.
     doc.style.setProperty('--keyboard-inset-height', prevInset);
@@ -297,6 +296,7 @@ function editableFocused() {
 
 function applyInset() {
   const px = slotClaimed() || pendingKeyboard ? surfaceHeight : keyboardHeight;
+  insetTargetSignal.value = px;
   document.documentElement.style.setProperty('--keyboard-inset-height', `${px}px`);
 }
 
@@ -386,26 +386,10 @@ function setSlotClaim(claim: object, active: boolean): boolean {
  *
  * Returns an unregister function.
  */
-export function registerAboveKeyboard(
-  node: HTMLElement,
-  opts?: {
-    /** On keyboard show the one-shot reflow is deferred to the end of the
-     * glide, so geometry-derived state (e.g. a navbar opacity keyed on scroll
-     * metrics) would lag the whole animation. This runs while the glide's
-     * final layout is applied invisibly for measurement, before the animation
-     * starts — read geometry freely, but write only paint-level styles
-     * (opacity, color): a layout-affecting write would corrupt the
-     * measurement. */
-    onPreviewLayoutMeasure?: () => void;
-  },
-): () => void {
+export function registerAboveKeyboard(node: HTMLElement): () => void {
   nodes.add(node);
-  if (opts?.onPreviewLayoutMeasure) {
-    previewMeasureCallbacks.set(node, opts.onPreviewLayoutMeasure);
-  }
   return () => {
     nodes.delete(node);
-    previewMeasureCallbacks.delete(node);
   };
 }
 
