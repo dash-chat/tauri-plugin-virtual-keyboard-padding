@@ -124,8 +124,14 @@ function scheduleSettle(
  * those targets, and the settle applies the reflow under the fully-risen
  * keyboard. Hide keeps the reflow up front: the layout has to grow immediately
  * so the region the keyboard vacates exists to glide down into.
+ *
+ * `entering` is a below-keyboard surface opening in this same flip. It is
+ * already at full height, so without a transform it would paint over the whole
+ * region the registered nodes are still gliding through; offsetting it by the
+ * distance they travel keeps its top edge under their bottom edge the whole
+ * way, so it rises into place like the keyboard it stands in for.
  */
-function flip(durationMs: number, layoutAtEnd = false) {
+function flip(durationMs: number, layoutAtEnd = false, entering?: HTMLElement) {
   durationMs = glideDuration(durationMs);
   const generation = ++flipGeneration;
   // WKWebView mis-renders a text caret whose ancestor is mid-transform. Keeping
@@ -209,15 +215,23 @@ function flip(durationMs: number, layoutAtEnd = false) {
   const lasts = new Map<HTMLElement, number>();
   nodes.forEach(n => lasts.set(n, n.getBoundingClientRect().top));
   // Invert: put each node back where it visually was.
+  let travel = 0;
   nodes.forEach(n => {
     const last = lasts.get(n) ?? 0;
     const delta = (firsts.get(n) ?? last) - last;
+    if (Math.abs(delta) > Math.abs(travel)) travel = delta;
     n.style.transform = layered.has(n)
       ? `translate3d(0, ${delta}px, 0)`
       : delta
         ? `translateY(${delta}px)`
         : '';
   });
+  // Measured from the movers rather than from the inset delta: what the surface
+  // has to clear is how far they actually go, and the app's bottom offset is
+  // `--keyboard-safe-bottom` — a max() against the safe area, so it grows by
+  // less than the inset does whenever the safe area was the larger of the two.
+  if (entering && travel) entering.style.transform = `translateY(${travel}px)`;
+  const gliding = entering ? [...nodes, entering] : nodes;
   // Flush so the inverted transform becomes the transition's start value.
   void document.documentElement.getBoundingClientRect();
   // Play on the next frame — same reason as the show path: transitions
@@ -232,7 +246,11 @@ function flip(durationMs: number, layoutAtEnd = false) {
       n.style.transition = `transform ${durationMs}ms ${CURVE}`;
       n.style.transform = layered.has(n) ? 'translate3d(0, 0, 0)' : '';
     });
-    scheduleSettle(nodes, durationMs, generation);
+    if (entering) {
+      entering.style.transition = `transform ${durationMs}ms ${CURVE}`;
+      entering.style.transform = '';
+    }
+    scheduleSettle(gliding, durationMs, generation);
   });
 }
 
@@ -346,10 +364,15 @@ onKeyboardHeightSettled(settled => {
 
 /** Add or drop one claimant's claim on the bottom slot: while any claim is
  *  active the slot owns the reserved height in the keyboard's place, and the
- *  FLIP glides everything registered above to match. Returns true when the
- *  release entered the swap hold — the slot stays reserved for the rising
- *  keyboard. */
-function setSlotClaim(claim: object, active: boolean): boolean {
+ *  FLIP glides everything registered above to match. `entering` is a surface
+ *  taking the slot in this same call, which the FLIP glides in with them.
+ *  Returns true when the release entered the swap hold — the slot stays
+ *  reserved for the rising keyboard. */
+function setSlotClaim(
+  claim: object,
+  active: boolean,
+  entering?: HTMLElement,
+): boolean {
   surfaceHeight = keyboard.reservedHeight.value;
   const wasClaimed = slotClaimed();
   if (active) slotClaims.add(claim);
@@ -376,7 +399,7 @@ function setSlotClaim(claim: object, active: boolean): boolean {
     return true;
   }
   clearPendingKeyboard();
-  flip(lastDurationMs);
+  flip(lastDurationMs, false, entering);
   return false;
 }
 
@@ -410,8 +433,10 @@ export interface BelowKeyboardSurface {
  * standing in for the keyboard. Opening over a live keyboard retracts the keyboard
  * so this node takes its place.
  *
- * Only the node's height is managed here, animated between 0 and the keyboard's
- * reserved height. Positioning it over the keyboard's region is the caller's job:
+ * The node's height (0 or the keyboard's reserved height) and its transform are
+ * managed here — opening glides it up behind the nodes above it, so it rises
+ * into place like the keyboard it replaces instead of appearing underneath them
+ * at full height. Positioning it over the keyboard's region is the caller's job:
  * pin it to the viewport bottom (`position: fixed`), and keep it out of any node
  * passed to `registerAboveKeyboard` — a registered ancestor's transform would drag
  * this node along instead of leaving it pinned, and would break `position: fixed`.
@@ -437,7 +462,12 @@ export function registerBelowKeyboard(node: HTMLElement): BelowKeyboardSurface {
       dropHeldSurface(node);
       visible.value = true;
       node.style.height = `${reserved}px`;
-      setSlotClaim(claim, true);
+      // Drop any transform a superseded glide left behind before the flip sets
+      // the entrance offset — with the transition cleared first, so landing on
+      // the offset is instant rather than animated from the stale value.
+      node.style.transition = 'none';
+      node.style.transform = '';
+      setSlotClaim(claim, true, node);
       return;
     }
     const held = setSlotClaim(claim, false);
@@ -451,6 +481,8 @@ export function registerBelowKeyboard(node: HTMLElement): BelowKeyboardSurface {
     // a re-sync (e.g. reservedHeight changing) must not cut it short.
     if (heldSurface?.node === node) return;
     node.style.height = '0px';
+    node.style.transition = 'none';
+    node.style.transform = '';
     hidden();
   };
 
