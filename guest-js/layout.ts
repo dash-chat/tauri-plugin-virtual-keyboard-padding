@@ -290,11 +290,16 @@ function clearPendingKeyboard() {
 // A below-keyboard surface released into the swap hold: it stays at full height
 // — visible under the rising keyboard — until the keyboard has covered it, then
 // collapses and notifies its owner (which unmounts the content).
-let heldSurface: { node: HTMLElement; onHidden?: () => void } | null = null;
+let heldSurface: {
+  node: HTMLElement;
+  onHidden?: () => void;
+  shade?: HTMLElement;
+} | null = null;
 let heldSurfaceTimer: ReturnType<typeof setTimeout> | undefined;
 
 function dropHeldSurface(node?: HTMLElement) {
   if (node && heldSurface?.node !== node) return;
+  if (heldSurface?.shade) resetShade(heldSurface.shade);
   heldSurface = null;
   clearTimeout(heldSurfaceTimer);
 }
@@ -311,8 +316,40 @@ function resolveHeldSurface(delayMs: number) {
     if (heldSurface !== held) return;
     heldSurface = null;
     held.node.style.height = '0px';
+    if (held.shade) resetShade(held.shade);
     held.onHidden?.();
   }, delayMs);
+}
+
+/** Slide an opaque cover up over a held surface in lockstep with the reclaiming
+ * keyboard. The keyboard's material is a translucent blur, so without this the
+ * surface's content (e.g. photos) ghosts through it as it rises; the cover,
+ * painted the surface's own background color, makes the blur sample flat color
+ * instead. It slides on the same curve/duration as the keyboard, so its top edge
+ * tracks the keyboard's — content above the edge stays fully visible until the
+ * edge passes over it, then is covered rather than cut. translate3d (not
+ * translateY) so WebKit composites it and actually animates the slide. */
+function raiseShade(
+  node: HTMLElement,
+  shade: HTMLElement,
+  height: number,
+  durationMs: number,
+) {
+  shade.style.background = getComputedStyle(node).backgroundColor;
+  shade.style.transition = 'none';
+  shade.style.height = `${height}px`;
+  shade.style.transform = `translate3d(0, ${height}px, 0)`;
+  void shade.getBoundingClientRect();
+  requestAnimationFrame(() => {
+    shade.style.transition = `transform ${durationMs}ms ${CURVE}`;
+    shade.style.transform = 'translate3d(0, 0, 0)';
+  });
+}
+
+function resetShade(shade: HTMLElement) {
+  shade.style.transition = 'none';
+  shade.style.transform = 'translate3d(0, 0, 0)';
+  shade.style.height = '0px';
 }
 
 function editableFocused() {
@@ -346,7 +383,16 @@ onKeyboardWillShow(({ height, durationMs }) => {
   lastDurationMs = durationMs;
   clearPendingKeyboard();
   // The keyboard reclaiming the slot covers the held surface as it rises;
-  // collapse it once the animation has passed over it.
+  // slide the cover up locked to it so the surface's content doesn't ghost
+  // through the keyboard's blur, then collapse the surface once covered.
+  if (heldSurface?.shade) {
+    raiseShade(
+      heldSurface.node,
+      heldSurface.shade,
+      height,
+      glideDuration(durationMs),
+    );
+  }
   resolveHeldSurface(glideDuration(durationMs) + 50);
   if (!slotClaimed()) flip(durationMs, true);
 });
@@ -452,6 +498,14 @@ export function registerBelowKeyboard(node: HTMLElement): BelowKeyboardSurface {
   // height has to be clipped rather than spill past it.
   node.style.overflow = 'hidden';
 
+  // Opaque cover that slides up over the content during a keyboard-swap so it
+  // doesn't ghost through the rising keyboard's blur. Sits above the content;
+  // zero-height (invisible) until a swap raises it. See raiseShade.
+  const shade = document.createElement('div');
+  shade.style.cssText =
+    'position:absolute;inset-inline:0;bottom:0;height:0;pointer-events:none;';
+  node.appendChild(shade);
+
   const claim = {};
   let open = false;
   let destroyed = false;
@@ -479,8 +533,9 @@ export function registerBelowKeyboard(node: HTMLElement): BelowKeyboardSurface {
     const held = setSlotClaim(claim, false);
     if (held) {
       // Swap hold: keep the surface at full height, visible under the rising
-      // keyboard; the willShow/backstop resolution collapses it once covered.
-      heldSurface = { node, onHidden: hidden };
+      // keyboard; the willShow/backstop resolution collapses it once covered,
+      // and raises the shade over it meanwhile.
+      heldSurface = { node, onHidden: hidden, shade };
       return;
     }
     // A hold in progress owns the height until its resolution collapses it —
