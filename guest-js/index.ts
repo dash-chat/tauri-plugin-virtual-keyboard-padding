@@ -13,6 +13,7 @@ export {
 
 export {
   holdKeyboardSlot,
+  suppressKeyboardRestore,
   insetTarget,
   registerAboveKeyboard,
   registerBelowKeyboard,

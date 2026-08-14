@@ -572,20 +572,45 @@ export function registerBelowKeyboard(node: HTMLElement): BelowKeyboardSurface {
 }
 
 export interface KeyboardSlotHold {
-  /** Refocus the element that was focused at hold time and summon the
-   * keyboard. Called before release(), the claim release sees the focused
-   * editable and holds the inset until the rising keyboard's `willShow`
-   * reclaims it, so nothing above dips during the swap. Called after
-   * release(), it's a plain re-summon — e.g. once a dialog that covered the
-   * dismissal has closed. No-op if the element left the DOM: it can't take
-   * focus, and summoning the keyboard for it would leave typing dead-ended
-   * on body. */
+  /** Give the slot back, restoring the keyboard to the element that was
+   * focused at hold time. Resolved once the current update settles: with a
+   * restore suppressor active by then (a dialog opened from the same
+   * interaction), the slot is released without focusing and the restore
+   * waits until the last suppressor lifts; otherwise focus lands while the
+   * slot is still held, so the claim release sees the focused editable and
+   * holds the inset until the rising keyboard's `willShow` reclaims it —
+   * nothing above dips during the swap. No-op if the element left the DOM:
+   * it can't take focus, and summoning the keyboard for it would leave
+   * typing dead-ended on body. */
   restore(): void;
-  /** Give the slot back. Idempotent. */
+  /** Give the slot back without restoring focus. Idempotent. */
   release(): void;
 }
 
 const inertHold: KeyboardSlotHold = { restore() {}, release() {} };
+
+// A hold's restore() resolving under an active suppressor parks until the
+// last one lifts. Resolution happens a microtask after restore() so a
+// suppressor taken by the same interaction (the covering dialog's open) is
+// already registered.
+const restoreSuppressors = new Set<object>();
+let parkedRestore: (() => void) | null = null;
+
+/** Keep keyboard restores from running while the returned releaser is
+ * pending — e.g. while a dialog covers the app. A restore requested in the
+ * meantime runs when the last suppressor is released. */
+export function suppressKeyboardRestore(): () => void {
+  const token = {};
+  restoreSuppressors.add(token);
+  return () => {
+    if (!restoreSuppressors.delete(token)) return;
+    if (restoreSuppressors.size === 0 && parkedRestore !== null) {
+      const restore = parkedRestore;
+      parkedRestore = null;
+      restore();
+    }
+  };
+}
 
 /**
  * Retract the keyboard without giving up its slot: `--keyboard-inset-height`
@@ -608,18 +633,30 @@ export function holdKeyboardSlot(): KeyboardSlotHold {
   setSlotClaim(claim, true);
   setBandFloor(surfaceHeight);
   let released = false;
+  const drop = () => {
+    if (released) return;
+    released = true;
+    setBandFloor(0);
+    setSlotClaim(claim, false);
+  };
+  const focusAndSummon = () => {
+    if (focused?.isConnected) {
+      focused.focus({ preventScroll: true });
+      void showKeyboard();
+    }
+  };
   return {
     restore() {
-      if (focused?.isConnected) {
-        focused.focus({ preventScroll: true });
-        void showKeyboard();
-      }
+      queueMicrotask(() => {
+        if (restoreSuppressors.size > 0) {
+          drop();
+          parkedRestore = focusAndSummon;
+        } else {
+          focusAndSummon();
+          drop();
+        }
+      });
     },
-    release() {
-      if (released) return;
-      released = true;
-      setBandFloor(0);
-      setSlotClaim(claim, false);
-    },
+    release: drop,
   };
 }
