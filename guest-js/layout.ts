@@ -572,13 +572,20 @@ export function registerBelowKeyboard(node: HTMLElement): BelowKeyboardSurface {
 }
 
 export interface KeyboardSlotHold {
-  /** Give the slot back. `restoreFocus` refocuses the element that was focused
-   * at hold time and summons the keyboard into the still-held slot, so nothing
-   * above dips during the swap. Idempotent. */
-  release(opts?: { restoreFocus?: boolean }): void;
+  /** Refocus the element that was focused at hold time and summon the
+   * keyboard. Called before release(), the claim release sees the focused
+   * editable and holds the inset until the rising keyboard's `willShow`
+   * reclaims it, so nothing above dips during the swap. Called after
+   * release(), it's a plain re-summon — e.g. once a dialog that covered the
+   * dismissal has closed. No-op if the element left the DOM: it can't take
+   * focus, and summoning the keyboard for it would leave typing dead-ended
+   * on body. */
+  restore(): void;
+  /** Give the slot back. Idempotent. */
+  release(): void;
 }
 
-const inertHold: KeyboardSlotHold = { release() {} };
+const inertHold: KeyboardSlotHold = { restore() {}, release() {} };
 
 /**
  * Retract the keyboard without giving up its slot: `--keyboard-inset-height`
@@ -590,7 +597,7 @@ const inertHold: KeyboardSlotHold = { release() {} };
  */
 export function holdKeyboardSlot(): KeyboardSlotHold {
   if (!keyboard.isOpen.value) return inertHold;
-  // Captured before the claim blurs it, to give focus back on release. The
+  // Captured before the claim blurs it, to give focus back on restore. The
   // keyboard is open, so an editable owns it — but on Android a hold taken
   // from a long-press finds it already blurred (see lastFocusedEditable);
   // restoring anything else (body, a button) would leave the re-summoned
@@ -602,18 +609,16 @@ export function holdKeyboardSlot(): KeyboardSlotHold {
   setBandFloor(surfaceHeight);
   let released = false;
   return {
-    release({ restoreFocus = false } = {}) {
-      if (released) return;
-      released = true;
-      setBandFloor(0);
-      // Focus first: the claim release then sees the focused editable and holds
-      // the inset until the rising keyboard's `willShow` reclaims it.
-      // isConnected: an element that left the DOM can't take focus — summoning
-      // the keyboard for it would leave typing dead-ended on body.
-      if (restoreFocus && focused?.isConnected) {
+    restore() {
+      if (focused?.isConnected) {
         focused.focus({ preventScroll: true });
         void showKeyboard();
       }
+    },
+    release() {
+      if (released) return;
+      released = true;
+      setBandFloor(0);
       setSlotClaim(claim, false);
     },
   };
