@@ -571,28 +571,10 @@ export function registerBelowKeyboard(node: HTMLElement): BelowKeyboardSurface {
   };
 }
 
-export interface KeyboardSlotHold {
-  /** Give the slot back, restoring the keyboard to the element that was
-   * focused at hold time. Resolved once the current update settles: with a
-   * restore suppressor active by then (a dialog opened from the same
-   * interaction), the slot is released without focusing and the restore
-   * waits until the last suppressor lifts; otherwise focus lands while the
-   * slot is still held, so the claim release sees the focused editable and
-   * holds the inset until the rising keyboard's `willShow` reclaims it —
-   * nothing above dips during the swap. No-op if the element left the DOM:
-   * it can't take focus, and summoning the keyboard for it would leave
-   * typing dead-ended on body. */
-  restore(): void;
-  /** Give the slot back without restoring focus. Idempotent. */
-  release(): void;
-}
-
-const inertHold: KeyboardSlotHold = { restore() {}, release() {} };
-
-// A hold's restore() resolving under an active suppressor parks until the
-// last one lifts. Resolution happens a microtask after restore() so a
-// suppressor taken by the same interaction (the covering dialog's open) is
-// already registered.
+// A hold's dismissal resolving under an active suppressor parks its restore
+// until the last one lifts. Resolution happens a microtask after the
+// dismissal so a suppressor taken by the same interaction (the covering
+// dialog's open) is already registered.
 const restoreSuppressors = new Set<object>();
 let parkedRestore: (() => void) | null = null;
 
@@ -618,10 +600,21 @@ export function suppressKeyboardRestore(): () => void {
  * region painted, so the layout above stays put with no surface of its own —
  * e.g. under an overlay that dims the chat but must not collapse the composer.
  * When the keyboard is closed there is no space to preserve and the returned
- * hold is inert, so callers can hold and release unconditionally.
+ * dismissal is inert, so callers can hold and dismiss unconditionally.
+ *
+ * Returns the dismissal: calling it gives the slot back and restores the
+ * keyboard to the element that was focused at hold time, resolved once the
+ * current update settles. With a restore suppressor active by then (a dialog
+ * opened from the same interaction), the slot is released without focusing
+ * and the restore waits until the last suppressor lifts; otherwise focus
+ * lands while the slot is still held, so the claim release sees the focused
+ * editable and holds the inset until the rising keyboard's `willShow`
+ * reclaims it — nothing above dips during the swap. The restore is a no-op
+ * if the element left the DOM: it can't take focus, and summoning the
+ * keyboard for it would leave typing dead-ended on body. Idempotent.
  */
-export function holdKeyboardSlot(): KeyboardSlotHold {
-  if (!keyboard.isOpen.value) return inertHold;
+export function holdKeyboardSlot(): () => void {
+  if (!keyboard.isOpen.value) return () => {};
   // Captured before the claim blurs it, to give focus back on restore. The
   // keyboard is open, so an editable owns it — but on Android a hold taken
   // from a long-press finds it already blurred (see lastFocusedEditable);
@@ -633,30 +626,20 @@ export function holdKeyboardSlot(): KeyboardSlotHold {
   setSlotClaim(claim, true);
   setBandFloor(surfaceHeight);
   let released = false;
-  const drop = () => {
-    if (released) return;
-    released = true;
-    setBandFloor(0);
-    setSlotClaim(claim, false);
-  };
-  const focusAndSummon = () => {
+  const restore = () => {
     if (focused?.isConnected) {
       focused.focus({ preventScroll: true });
       void showKeyboard();
     }
   };
-  return {
-    restore() {
-      queueMicrotask(() => {
-        if (restoreSuppressors.size > 0) {
-          drop();
-          parkedRestore = focusAndSummon;
-        } else {
-          focusAndSummon();
-          drop();
-        }
-      });
-    },
-    release: drop,
+  return () => {
+    if (released) return;
+    released = true;
+    queueMicrotask(() => {
+      if (restoreSuppressors.size === 0) restore();
+      else parkedRestore = restore;
+      setBandFloor(0);
+      setSlotClaim(claim, false);
+    });
   };
 }

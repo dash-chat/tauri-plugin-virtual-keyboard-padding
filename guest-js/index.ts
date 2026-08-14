@@ -18,5 +18,4 @@ export {
   registerAboveKeyboard,
   registerBelowKeyboard,
   type BelowKeyboardSurface,
-  type KeyboardSlotHold,
 } from './layout';
