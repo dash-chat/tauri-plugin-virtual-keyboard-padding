@@ -1,4 +1,9 @@
-const COMMANDS: &[&str] = &[];
+const COMMANDS: &[&str] = &[
+  "hide",
+  "show",
+  "registerListener",
+  "removeListener",
+];
 
 fn main() {
   tauri_plugin::Builder::new(COMMANDS)

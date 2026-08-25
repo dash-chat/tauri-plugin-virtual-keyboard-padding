@@ -1,4 +1,4 @@
-package org.dashchat.virtual-keyboard-padding
+package org.dashchat.virtual-keyboard
 
 import org.junit.Test
 

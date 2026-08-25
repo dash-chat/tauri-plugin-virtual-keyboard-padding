@@ -1,7 +1,7 @@
 {
   "productName": "app",
   "version": "0.1.0",
-  "identifier": "com.tauri.virtual-keyboard-padding",
+  "identifier": "com.tauri.virtual-keyboard",
   "build": {
     "frontendDist": "../public"
   },

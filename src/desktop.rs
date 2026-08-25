@@ -4,17 +4,19 @@ use tauri::{plugin::PluginApi, AppHandle, Runtime};
 pub fn init<R: Runtime, C: DeserializeOwned>(
   app: &AppHandle<R>,
   _api: PluginApi<R, C>,
-) -> crate::Result<VirtualKeyboardPadding<R>> {
-  Ok(VirtualKeyboardPadding(app.clone()))
+) -> crate::Result<VirtualKeyboard<R>> {
+  Ok(VirtualKeyboard(app.clone()))
 }
 
-/// Access to the virtual-keyboard-padding APIs.
-pub struct VirtualKeyboardPadding<R: Runtime>(AppHandle<R>);
+/// Access to the virtual-keyboard APIs.
+pub struct VirtualKeyboard<R: Runtime>(AppHandle<R>);
 
-impl<R: Runtime> VirtualKeyboardPadding<R> {
-  // pub fn ping(&self, payload: PingRequest) -> crate::Result<PingResponse> {
-  //   Ok(PingResponse {
-  //     value: payload.value,
-  //   })
-  // }
+impl<R: Runtime> VirtualKeyboard<R> {
+  pub fn hide(&self) -> crate::Result<()> {
+    Ok(())
+  }
+
+  pub fn show(&self) -> crate::Result<()> {
+    Ok(())
+  }
 }
