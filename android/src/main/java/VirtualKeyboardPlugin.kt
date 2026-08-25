@@ -4,7 +4,6 @@ import android.view.View
 import android.app.Activity
 import app.tauri.annotation.Command
 import app.tauri.annotation.TauriPlugin
-import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import app.tauri.plugin.Invoke
 import androidx.core.graphics.Insets
@@ -20,6 +19,18 @@ class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
     private var webView: WebView? = null
     private var animating = false
     private var imeVisible = false
+
+    // The keyboard events go straight into the page: the Tauri plugin event
+    // channel delivers with hundreds of ms of latency, so a willShow sent
+    // through it arrives after the IME animation it announces has already
+    // finished. A direct evaluation lands within a frame or two — early
+    // enough for the page to glide its layout in sync with the animation.
+    // Runs on the UI thread (the insets callbacks' thread).
+    private fun emit(name: String, json: String) {
+        webView?.evaluateJavascript(
+            "window.__VIRTUAL_KEYBOARD_EVENT__ && window.__VIRTUAL_KEYBOARD_EVENT__('$name', $json)",
+            null)
+    }
 
     override fun load(webView: WebView) {
         super.load(webView)
@@ -81,9 +92,7 @@ class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
                 // Animated changes are reported by the willShow/willHide pair
                 // below; this covers IMEs/settings where no animation runs.
                 if (!animating) {
-                    val data = JSObject()
-                    data.put("height", ime.bottom / density)
-                    trigger("change", data)
+                    emit("change", "{\"height\":${ime.bottom / density}}")
                 }
 
                 windowInsets
@@ -107,13 +116,10 @@ class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
                     // The end-state insets are already dispatched by onStart, so
                     // the root insets carry the animation's target height.
                     val target = imeHeight(rootView) / density
-                    val data = JSObject()
-                    data.put("durationMs", animation.durationMillis)
                     if (target > 0) {
-                        data.put("height", target)
-                        trigger("willShow", data)
+                        emit("willShow", "{\"height\":$target,\"durationMs\":${animation.durationMillis}}")
                     } else {
-                        trigger("willHide", data)
+                        emit("willHide", "{\"durationMs\":${animation.durationMillis}}")
                     }
                 }
                 return bounds
@@ -131,12 +137,10 @@ class VirtualKeyboardPlugin(private val activity: Activity): Plugin(activity) {
                 if ((animation.typeMask and WindowInsetsCompat.Type.ime()) != 0) {
                     animating = false
                     val height = imeHeight(rootView) / density
-                    val data = JSObject()
                     if (height > 0) {
-                        data.put("height", height)
-                        trigger("didShow", data)
+                        emit("didShow", "{\"height\":$height}")
                     } else {
-                        trigger("didHide", data)
+                        emit("didHide", "{}")
                     }
                 }
             }

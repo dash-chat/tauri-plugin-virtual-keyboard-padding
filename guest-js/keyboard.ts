@@ -1,4 +1,3 @@
-import { addPluginListener } from '@tauri-apps/api/core';
 import { signal, reactiveSignal, type ReadonlySignal } from 'signalium';
 
 import { hideKeyboardCommand } from './commands';
@@ -142,10 +141,25 @@ export function onKeyboardHeightSettled(
   return () => settledListeners.delete(listener);
 }
 
+const nativeHandlers = new Map<string, (payload: never) => void>();
+
+// Entry point for the native sides' direct evaluations (see each platform
+// plugin's `emit`): the Tauri plugin event channel delivers with enough
+// latency that a willShow sent through it arrives after the IME animation it
+// announces has already finished; the direct call lands within a frame or
+// two.
+if (typeof window !== 'undefined') {
+  (
+    window as { __VIRTUAL_KEYBOARD_EVENT__?: (event: string, payload: unknown) => void }
+  ).__VIRTUAL_KEYBOARD_EVENT__ = (event, payload) => {
+    nativeHandlers.get(event)?.(payload as never);
+  };
+}
+
 function listen<T>(event: string, handler: (payload: T) => void) {
-  // Desktop builds have no native side to register listeners with; the state
-  // then simply stays closed.
-  addPluginListener('virtual-keyboard', event, handler).catch(() => {});
+  // Desktop builds have no native side, so nothing ever calls the hook and
+  // the state simply stays closed.
+  nativeHandlers.set(event, handler as (payload: never) => void);
 }
 
 /** Best guess of where the IME will settle. The willShow target comes from

@@ -6,6 +6,18 @@ class VirtualKeyboardPlugin: Plugin, UIScrollViewDelegate {
     private weak var webView: WKWebView?
     private var currentHeight: CGFloat = 0
 
+    // The keyboard events go straight into the page: the Tauri plugin event
+    // channel delivers with enough latency that a willShow sent through it
+    // can arrive after the keyboard animation it announces has already
+    // finished. A direct evaluation lands within a frame or two — early
+    // enough for the page to glide its layout in sync with the animation.
+    // Runs on the main thread (the keyboard notifications' thread).
+    private func emit(_ name: String, _ json: String) {
+        webView?.evaluateJavaScript(
+            "window.__VIRTUAL_KEYBOARD_EVENT__ && window.__VIRTUAL_KEYBOARD_EVENT__('\(name)', \(json))",
+            completionHandler: nil)
+    }
+
     public override func load(webview: WKWebView) {
         self.webView = webview
 
@@ -95,10 +107,7 @@ class VirtualKeyboardPlugin: Plugin, UIScrollViewDelegate {
 
         let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
 
-        var data = JSObject()
-        data["height"] = Double(height)
-        data["durationMs"] = duration * 1000
-        try? trigger("willShow", data: data)
+        emit("willShow", "{\"height\":\(Double(height)),\"durationMs\":\(duration * 1000)}")
     }
 
     @objc private func keyboardWillHide(_ notification: Notification) {
@@ -107,19 +116,15 @@ class VirtualKeyboardPlugin: Plugin, UIScrollViewDelegate {
 
         let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
 
-        var data = JSObject()
-        data["durationMs"] = duration * 1000
-        try? trigger("willHide", data: data)
+        emit("willHide", "{\"durationMs\":\(duration * 1000)}")
     }
 
     @objc private func keyboardDidShow(_ notification: Notification) {
-        var data = JSObject()
-        data["height"] = Double(currentHeight)
-        try? trigger("didShow", data: data)
+        emit("didShow", "{\"height\":\(Double(currentHeight))}")
     }
 
     @objc private func keyboardDidHide(_ notification: Notification) {
-        try? trigger("didHide", data: JSObject())
+        emit("didHide", "{}")
     }
 
     /// Swizzle the WKWebView content view's inputAccessoryView to remove the "Done" toolbar.
