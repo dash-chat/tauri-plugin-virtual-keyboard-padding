@@ -41,6 +41,7 @@ const CURVE = IS_ANDROID
   ? 'cubic-bezier(0.2, 0, 0, 1)'
   : 'cubic-bezier(0.38, 0.7, 0.125, 1)';
 const ANDROID_MAX_GLIDE_MS = 220;
+const SETTLE_CORRECT_MS = 150;
 
 function glideDuration(durationMs: number): number {
   return IS_ANDROID ? Math.min(durationMs, ANDROID_MAX_GLIDE_MS) : durationMs;
@@ -79,8 +80,9 @@ function scheduleSettle(
     if (generation !== flipGeneration) return;
     // A layout-at-end glide swaps the glided transforms for the real layout
     // here, in one paint: the reflow lands exactly where the transforms left
-    // off.
-    if (applyInsetOnSettle) applyInset();
+    // off — unless the content changed during the glide, in which case a
+    // short follow-up glide carries the nodes the rest of the way.
+    if (applyInsetOnSettle && correctSettleDrift()) return;
     for (const node of toClear) {
       // Clear the transition first so dropping the transform is instant — it's
       // the identity, so there is nothing to animate away.
@@ -90,6 +92,48 @@ function scheduleSettle(
     // Flush the untransformed layout before the caret is drawn again.
     void document.documentElement.getBoundingClientRect();
     restoreCaret();
+  };
+
+  /** The glide targets were measured at flip time, but content can grow or
+   * shrink while the glide runs (e.g. a reply banner animating open), moving
+   * where the settle reflow actually lands each node. Measure that drift and,
+   * when visible, glide the nodes from their glided spots to their real ones
+   * instead of jumping. Returns whether a correction glide was started — it
+   * owns clearing the transforms and restoring the caret when it lands.
+   * Applies the inset either way. */
+  const correctSettleDrift = (): boolean => {
+    const glided = new Map<HTMLElement, number>();
+    for (const node of toClear)
+      glided.set(node, node.getBoundingClientRect().top);
+    applyInset();
+    for (const node of toClear) {
+      node.style.transition = 'none';
+      node.style.transform = '';
+    }
+    const drifts = new Map<HTMLElement, number>();
+    let maxDrift = 0;
+    for (const node of toClear) {
+      const drift = (glided.get(node) ?? 0) - node.getBoundingClientRect().top;
+      drifts.set(node, drift);
+      maxDrift = Math.max(maxDrift, Math.abs(drift));
+    }
+    if (maxDrift <= 1) return false;
+    // None of this paints before the rAF: transforms below restore each node
+    // to its glided spot within the same frame.
+    for (const node of toClear) {
+      const drift = drifts.get(node) ?? 0;
+      node.style.transform = drift ? `translateY(${drift}px)` : '';
+    }
+    void document.documentElement.getBoundingClientRect();
+    requestAnimationFrame(() => {
+      if (generation !== flipGeneration) return;
+      for (const node of toClear) {
+        node.style.transition = `transform ${SETTLE_CORRECT_MS}ms ${CURVE}`;
+        node.style.transform = '';
+      }
+      scheduleSettle(toClear, SETTLE_CORRECT_MS, generation);
+    });
+    return true;
   };
 
   const onTransitionEnd = (event: TransitionEvent) => {
@@ -105,38 +149,6 @@ function scheduleSettle(
   timer = setTimeout(run, durationMs + 50);
 }
 
-// env(safe-area-inset-bottom), measured once through a probe element —
-// `--keyboard-safe-bottom` is a max() against it, so how far the layout
-// actually shifts for an inset change depends on it. Invalidated on
-// orientation change, where the insets are redistributed.
-let safeBottom: number | null = null;
-
-function safeAreaBottom(): number {
-  if (safeBottom !== null) return safeBottom;
-  const probe = document.createElement('div');
-  probe.style.cssText =
-    'position:fixed;top:0;height:env(safe-area-inset-bottom,0px);' +
-    'visibility:hidden;pointer-events:none;';
-  document.body.appendChild(probe);
-  safeBottom = probe.getBoundingClientRect().height;
-  probe.remove();
-  return safeBottom;
-}
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('orientationchange', () => {
-    safeBottom = null;
-  });
-  // Prime the measurement outside the willShow hot path, where its one-time
-  // probe reflow would delay the first glide.
-  const prime = () => void safeAreaBottom();
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', prime);
-  } else {
-    prime();
-  }
-}
-
 /**
  * Animate a keyboard-driven layout change without ever animating a reflow.
  *
@@ -145,11 +157,11 @@ if (typeof window !== 'undefined') {
  * reflow to lag and tremble. We then FLIP the registered nodes: apply the
  * inverse `transform` so each looks unmoved, then transition the transform
  * away so it *glides* to its new spot on the compositor, in sync with the
- * native keyboard. The travel is computed from the inset delta rather than
- * measured (registered nodes are bottom-anchored chrome that moves by exactly
- * the `--keyboard-safe-bottom` change); only a flip that supersedes one still
- * in flight measures, since the nodes' current visual offsets are then only
- * knowable from geometry.
+ * native keyboard. The travel is measured per node, not computed from the
+ * inset delta: a registered chat scroller whose content doesn't overflow the
+ * viewport moves by only its overflow amount (possibly nothing) when the
+ * inset changes, so a computed delta would glide it too far and snap it back
+ * at settle.
  *
  * The one-shot reflow happens at whichever endpoint of the transition the
  * keyboard is up, so the layout only ever changes while the keyboard occludes
@@ -185,78 +197,7 @@ function flip(durationMs: number, layoutAtEnd = false, entering?: HTMLElement) {
   restoreCaret();
   if (layered.size > 0 && active instanceof HTMLElement) hideCaret(active);
 
-  const hadTransform = Array.from(nodes).some(
-    n => n.style.transform !== '' && n.style.transform !== 'none',
-  );
-
-  // How far the registered nodes travel. Computed, not measured: they are
-  // bottom-anchored chrome offset by `--keyboard-safe-bottom` (a max() of the
-  // inset and the safe area), so an inset change moves each of them by exactly
-  // the padding delta. Skipping the measurement matters — on low-end devices a
-  // forced reflow here costs upwards of 60ms, and this runs in the willShow
-  // hot path where every ms delays the frame that starts the glide while the
-  // IME animation is already playing.
-  const safe = safeAreaBottom();
-  const shift =
-    Math.max(computeInset(), safe) - Math.max(appliedInset, safe);
   insetTargetSignal.value = computeInset();
-
-  // With a superseded glide still in flight, a node's inline transform holds
-  // its target rather than its current visual spot, so the start offsets have
-  // to be measured; that slow path keeps the original FLIP. Otherwise the
-  // whole glide is set up without touching layout.
-  if (!hadTransform) {
-    if (layoutAtEnd) {
-      // Old layout persists through the glide; the settle applies the reflow
-      // under the fully-risen keyboard.
-      nodes.forEach(n => {
-        n.style.transition = 'none';
-        n.style.transform = layered.has(n) ? 'translate3d(0, 0, 0)' : '';
-      });
-      requestAnimationFrame(() => {
-        if (generation !== flipGeneration) return;
-        nodes.forEach(n => {
-          n.style.transition = `transform ${durationMs}ms ${CURVE}`;
-          n.style.transform = layered.has(n)
-            ? `translate3d(0, ${-shift}px, 0)`
-            : shift !== 0
-              ? `translateY(${-shift}px)`
-              : '';
-        });
-        scheduleSettle(nodes, durationMs, generation, true);
-      });
-      return;
-    }
-    // Layout up front (the hide/surface path): one reflow to the final
-    // layout, inverse transforms keep everything looking unmoved until the
-    // glide starts. See the entering-surface notes on the measured path.
-    applyInset();
-    nodes.forEach(n => {
-      n.style.transition = 'none';
-      n.style.transform = layered.has(n)
-        ? `translate3d(0, ${shift}px, 0)`
-        : shift !== 0
-          ? `translateY(${shift}px)`
-          : '';
-    });
-    if (entering && shift !== 0)
-      entering.style.transform = `translate3d(0, ${shift}px, 0)`;
-    const gliding = entering ? [...nodes, entering] : nodes;
-    void document.documentElement.getBoundingClientRect();
-    requestAnimationFrame(() => {
-      if (generation !== flipGeneration) return;
-      nodes.forEach(n => {
-        n.style.transition = `transform ${durationMs}ms ${CURVE}`;
-        n.style.transform = layered.has(n) ? 'translate3d(0, 0, 0)' : '';
-      });
-      if (entering) {
-        entering.style.transition = `transform ${durationMs}ms ${CURVE}`;
-        entering.style.transform = 'translate3d(0, 0, 0)';
-      }
-      scheduleSettle(gliding, durationMs, generation);
-    });
-    return;
-  }
 
   const firsts = new Map<HTMLElement, number>();
   // First: current visual position (accounts for a transform still in flight).
@@ -274,8 +215,8 @@ function flip(durationMs: number, layoutAtEnd = false, entering?: HTMLElement) {
     const oldTops = new Map<HTMLElement, number>();
     nodes.forEach(n => oldTops.set(n, n.getBoundingClientRect().top));
     // Measure the future without ever painting it: apply, read, revert. The
-    // var is written directly rather than through applyInset so appliedInset
-    // keeps describing the layout actually on screen.
+    // var is written directly rather than through applyInset because it is
+    // reverted right after — the layout on screen never changes here.
     const prevInset = doc.style.getPropertyValue('--keyboard-inset-height');
     doc.style.setProperty('--keyboard-inset-height', `${computeInset()}px`);
     const lasts = new Map<HTMLElement, number>();
@@ -465,15 +406,9 @@ function computeInset(): number {
   return slotClaimed() || pendingKeyboard ? surfaceHeight : keyboardHeight;
 }
 
-// The inset the layout currently reflects — updated only when the CSS var
-// really changes, so a deferred (layout-at-end) glide can compute its travel
-// against the layout that is actually on screen.
-let appliedInset = 0;
-
 function applyInset() {
   const px = computeInset();
   insetTargetSignal.value = px;
-  appliedInset = px;
   document.documentElement.style.setProperty('--keyboard-inset-height', `${px}px`);
 }
 
